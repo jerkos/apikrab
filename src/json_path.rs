@@ -1,5 +1,10 @@
 /// Dummy start of implementation of json_path
 pub fn json_path(json_str: &str, search: &str) -> Option<serde_json::Value> {
+    // if search is $, return the whole json
+    if search == "$" {
+        return serde_json::from_str(json_str).ok();
+    }
+
     let json: serde_json::Value = serde_json::from_str(json_str).ok()?;
     search
         .split(".")
