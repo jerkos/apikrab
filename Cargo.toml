@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-sqlx = { version = "0.7", features = [ "runtime-tokio", "sqlite" ] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
 reqwest = { version = "0.11.18", features = ["json"] }
 either = "1.8.1"
 serde = { version = "1.0.164", features = ["derive"] }
@@ -18,3 +18,4 @@ thiserror = "1.0.40"
 anyhow = "1.0.75"
 clap = { version = "4.3.24", features = ["derive"] }
 colored = "2.0.4"
+chrono = {version = "0.4.28", features = ["serde"]}

@@ -1,4 +1,4 @@
-use crate::db::dao::{Context, LightAction, Project};
+use crate::db::dao::{Context, History, LightAction, Project};
 use colored::Colorize;
 use sqlx::{sqlite::SqlitePool, Executor, Row};
 
@@ -39,6 +39,18 @@ CREATE TABLE flows (
     path_params TEXT,
     extracted_path TEXT
 );
+CREATE TABLE history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    body TEXT,
+    headers TEXT,
+    response TEXT,
+    status_code INTEGER NOT NULL,
+    duration REAL NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(action_name) REFERENCES actions(name)
+);
 
 CREATE TABLE context (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,11 +63,6 @@ COMMIT;
 static MISSING_HOME: &str = "Missing HOME env variable";
 static PROJECT_NOT_FOUND: &str =
     "Project not found. Did you forget to create it running `qapi create-project <project_name>`?";
-
-static URL_NOT_FOUND: &str = r#"
-    Url not found.
-    Did you forget to add it running `qapi add-url <project_name> <url> <api_key> <env>`?
-"#;
 static CONNECTION_ERROR: &str = "Connection to database failed";
 
 pub struct DBHandler {
@@ -108,11 +115,12 @@ impl DBHandler {
     }
 
     /// create a new project with the given name
-    pub async fn upsert_project(&self, project: &Project) -> anyhow::Result<u64> {
+    pub async fn upsert_project(&self, project: &Project) -> anyhow::Result<i64> {
         let r = sqlx::query(
             r#"
             INSERT INTO projects (name, test_url, prod_url, conf)
-            VALUES (?1, ?2, ?3, ?4) ON CONFLICT (name) DO NOTHING
+            VALUES (?1, ?2, ?3, ?4) ON CONFLICT (name)
+            DO UPDATE SET test_url = ?2, prod_url = ?3, conf= ?4;
             "#,
         )
         .bind(&project.name)
@@ -121,10 +129,10 @@ impl DBHandler {
         .bind(&project.conf)
         .execute(self.get_conn())
         .await?
-        .rows_affected();
+        .last_insert_rowid();
 
         match r {
-            0 => println!("{}", "Project already exists".blue()),
+            0 => println!("{}", "Project updated".blue()),
             _ => println!("{}", "Project successfully created !".yellow()),
         }
         Ok(r)
@@ -293,5 +301,41 @@ impl DBHandler {
         .last_insert_rowid();
 
         Ok(r)
+    }
+
+    pub async fn insert_history(&self, history: &History) -> anyhow::Result<i64> {
+        let r = sqlx::query(
+            r#"
+            INSERT INTO history (action_name, url, body, headers, response, status_code, duration)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+            "#,
+        )
+        .bind(&history.action_name)
+        .bind(&history.url)
+        .bind(&history.body)
+        .bind(&history.headers)
+        .bind(&history.response)
+        .bind(&history.status_code)
+        .bind(&history.duration)
+        .execute(self.get_conn())
+        .await?
+        .last_insert_rowid();
+
+        Ok(r)
+    }
+
+    pub async fn get_history(&self) -> anyhow::Result<Vec<History>> {
+        let history = sqlx::query_as::<_, History>(
+            r#"
+            SELECT *
+            FROM history
+            ORDER BY timestamp DESC
+            limit 20;
+            "#,
+        )
+        .fetch_all(self.get_conn())
+        .await?;
+
+        Ok(history)
     }
 }

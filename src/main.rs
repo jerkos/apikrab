@@ -4,6 +4,7 @@ mod http;
 mod json_path;
 mod utils;
 
+use crate::commands::history::{History, HistoryCommands};
 use clap::{Args, Parser, Subcommand};
 
 use crate::commands::project::{Project, ProjectCommands};
@@ -25,7 +26,7 @@ enum Commands {
     // Add action to a specified url
     Run(Run),
     // history
-    //RunFlow(RunFlowArgs),
+    History(History),
 }
 
 #[derive(Args)]
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     db_handler.init_db().await?;
 
     // init http requester
-    let requester = http::Api::new();
+    let requester = http::Api::new(&db_handler);
 
     // parse cli args
     let mut cli: Cli = Cli::parse();
@@ -64,7 +65,12 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::Run(run) => match &mut run.run_commands {
             RunCommands::Action(run_action_args) => {
-                run_action_args.run_action(&db_handler, &requester).await?;
+                run_action_args.run_action(&requester).await?;
+            }
+        },
+        Commands::History(history) => match &mut history.history_commands {
+            HistoryCommands::List(history_args) => {
+                history_args.list_history(&db_handler).await?;
             }
         },
     }

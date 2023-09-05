@@ -114,3 +114,32 @@ impl Context {
         serde_json::from_str(&self.value).expect("Error deserializing value")
     }
 }
+
+#[derive(sqlx::FromRow, Debug)]
+pub struct History {
+    pub id: Option<i64>,
+    pub action_name: String,
+    pub url: String,
+    pub body: Option<String>,
+    pub headers: Option<String>,
+    pub response: Option<String>,
+    pub status_code: u16,
+    pub duration: f32,
+    pub timestamp: Option<chrono::NaiveDateTime>,
+}
+
+impl Display for History {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} | {} | {} | {:?}",
+            self.timestamp
+                .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or("None".to_string())
+                .cyan(),
+            self.action_name.green(),
+            self.status_code.to_string().yellow(),
+            self.duration,
+        )
+    }
+}

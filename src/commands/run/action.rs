@@ -1,6 +1,5 @@
-use crate::db::db_handler::DBHandler;
 use crate::http;
-use crate::utils::parse_multiple_conf;
+use crate::utils::{parse_multiple_conf, parse_multiple_conf_as_opt};
 use clap::Args;
 use log::debug;
 use std::collections::HashMap;
@@ -74,7 +73,7 @@ impl RunActionArgs {
                     Some(data_vec) => {
                         if !is_chained_cmd {
                             if data_vec.len() > 1 {
-                                let contains_acc = data_vec.iter().all(|s| !s.contains("{"));
+                                let contains_acc = data_vec.iter().any(|s| s.contains("{"));
                                 if contains_acc {
                                     anyhow::bail!(
                                         "Chain, body and extract path must have the same length"
@@ -117,13 +116,9 @@ impl RunActionArgs {
 
         Ok(())
     }
-    pub async fn run_action(
-        &mut self,
-        db_handler: &DBHandler,
-        requester: &http::Api,
-    ) -> anyhow::Result<()> {
+    pub async fn run_action<'a>(&'a mut self, requester: &'a http::Api<'_>) -> anyhow::Result<()> {
         // creating a new context hashmap for storing extracted values
-        let mut ctx: HashMap<String, String> = match db_handler.get_conf().await {
+        let mut ctx: HashMap<String, String> = match requester.db_handler.get_conf().await {
             Ok(ctx) => ctx.get_value(),
             Err(..) => HashMap::new(),
         };
@@ -148,7 +143,7 @@ impl RunActionArgs {
         for ((((action_name, action_body), action_extract_path), path_params), query_params) in
             zipped
         {
-            let mut action = db_handler.get_action(action_name).await?;
+            let mut action = requester.db_handler.get_action(action_name).await?;
 
             let computed_body = match action_body.as_str() {
                 // if static body exists, use it otherwise None is used
@@ -175,35 +170,43 @@ impl RunActionArgs {
             let computed_extract_path = match action_extract_path.as_str() {
                 "" => None,
                 _ => {
-                    let p = action_extract_path.as_str().split(":").collect::<Vec<_>>();
-                    let v = p.get(1);
-                    match v {
-                        Some(path_name) => {
-                            if ctx.contains_key(*path_name) && !self.force {
-                                println!("Continuing !");
-                                debug!("Continuing !");
-                                continue;
-                            }
-                        }
-                        _ => {}
+                    let value = action_extract_path
+                        .as_str()
+                        .split(",")
+                        .map(|s| {
+                            let mut split = s.split(":");
+                            (
+                                split.next().unwrap().to_string(),
+                                split.next().map(String::from),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+
+                    let all_values = value
+                        .values()
+                        .filter_map(|v| v.as_ref())
+                        .map(|v| ctx.contains_key(v))
+                        .collect::<Vec<_>>();
+
+                    let needs_to_continue = all_values.iter().all(|v| *v);
+                    if !all_values.is_empty() && needs_to_continue && !self.force {
+                        println!("Continuing !");
+                        debug!("Continuing !");
+                        continue;
                     }
-                    Some(action_extract_path.to_string())
+                    Some(value)
                 }
             };
 
-            let computed_path_params = match path_params.as_str() {
-                "" => None,
-                _ => {
-                    let path_value_by_name = parse_multiple_conf(&path_params);
-                    Some(path_value_by_name)
-                }
-            };
+            let computed_path_params = parse_multiple_conf_as_opt(path_params);
+            let computed_query_params = parse_multiple_conf_as_opt(query_params);
+
             requester
                 .run_action(
                     &mut action,
                     &computed_path_params,
+                    &computed_query_params,
                     &computed_body,
-                    db_handler,
                     &computed_extract_path,
                     self.no_print,
                     &mut ctx,
@@ -212,7 +215,8 @@ impl RunActionArgs {
         }
 
         if is_chained_action && self.save_as.is_some() {
-            db_handler
+            requester
+                .db_handler
                 .upsert_flow(
                     self.save_as.as_ref().unwrap(),
                     &self.chain.as_ref().unwrap(),

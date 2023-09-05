@@ -34,3 +34,13 @@ pub fn parse_multiple_conf(conf: &str) -> HashMap<String, String> {
         })
         .collect::<HashMap<_, _>>()
 }
+
+pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<String, String>> {
+    match conf {
+        "" => None,
+        _ => {
+            let path_value_by_name = parse_multiple_conf(&conf);
+            Some(path_value_by_name)
+        }
+    }
+}
