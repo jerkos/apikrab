@@ -1,4 +1,5 @@
-mod list;
+pub(crate) mod list;
+pub(crate) mod list_ui;
 
 use clap::{Args, Subcommand};
 

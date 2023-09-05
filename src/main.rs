@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod http;
 mod json_path;
+mod ui;
 mod utils;
 
 use crate::commands::history::{History, HistoryCommands};
@@ -10,6 +11,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::db::db_handler::DBHandler;
+use crate::ui::run_ui::UIRunner;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -70,7 +72,9 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::History(history) => match &mut history.history_commands {
             HistoryCommands::List(history_args) => {
-                history_args.list_history(&db_handler).await?;
+                let histories = db_handler.get_history().await?;
+                let mut ui = commands::history::list_ui::HistoryUI::new(histories);
+                ui.run_ui()?;
             }
         },
     }
