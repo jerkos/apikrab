@@ -96,7 +96,7 @@ impl ProjectUI {
                     ListItem::new(vec![
                         Line::styled(
                             format!(
-                                "{}({})",
+                                " 💫 {}({})",
                                 p.name.clone(),
                                 p.get_conf()
                                     .keys()
@@ -108,7 +108,7 @@ impl ProjectUI {
                         ),
                         Line::styled(
                             format!(
-                                "    💫 {} | {}",
+                                "    {} | {}",
                                 p.test_url.as_ref().unwrap_or(&"None".to_string()),
                                 p.prod_url.as_ref().unwrap_or(&"None".to_string()),
                             ),
@@ -149,9 +149,18 @@ impl ProjectUI {
                             a.name.clone(),
                             Style::default().fg(Color::LightGreen).bold(),
                         ),
-                        Line::styled(
-                            format!("    {} {}", a.verb, a.url),
-                            Style::default().fg(Color::LightBlue),
+                        Line::from(vec![
+                            Span::raw("    "),
+                            match a.verb.as_str() {
+                                "POST" => Span::styled(a.verb.clone(), Style::default().fg(Color::DarkGray).bg(Color::Green)),
+                                "GET" => Span::styled(a.verb.clone(), Style::default().fg(Color::DarkGray).bg(Color::Blue)),
+                                _ => Span::styled(a.verb.clone(), Style::default().fg(Color::DarkGray).bg(Color::Red)),
+                            },
+                            Span::raw(" "),
+                            Span::styled(a.url.clone(), Style::default().fg(Color::LightBlue)),
+                            Span::raw(" "),
+                            Span::styled(if a.is_form() { "(form)" } else { "(json)" }, Style::default().fg(Color::DarkGray)),
+                        ]
                         ),
                     ])
                 })

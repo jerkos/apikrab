@@ -66,6 +66,10 @@ impl LightAction {
     pub fn headers_as_map(&self) -> HashMap<String, String> {
         serde_json::from_str(&self.headers).expect("Error deserializing headers")
     }
+
+    pub fn is_form(&self) -> bool {
+        self.headers_as_map().get("Content-Type").unwrap_or(&"".to_string()) == "application/x-www-form-urlencoded"
+    }
 }
 
 impl From<&AddActionArgs> for LightAction {
