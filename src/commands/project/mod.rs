@@ -2,6 +2,7 @@ pub mod add_action;
 pub mod create;
 pub mod info;
 pub mod list;
+pub mod project_ui;
 mod rm_action;
 
 //pub mod project {
@@ -29,4 +30,6 @@ pub enum ProjectCommands {
     Info(ProjectInfoArgs),
     // list projects
     List(ListProjects),
+
+    Ui,
 }

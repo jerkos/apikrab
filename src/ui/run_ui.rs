@@ -5,8 +5,41 @@ use crossterm::{
 };
 use ratatui::backend::Backend;
 use ratatui::prelude::CrosstermBackend;
+use ratatui::widgets::TableState;
 use ratatui::{Frame, Terminal};
 use std::io;
+
+pub trait StatefulTable {
+    fn items_len(&self) -> usize;
+    fn table_state(&mut self) -> &mut TableState;
+    fn next(&mut self) {
+        let items_len = self.items_len();
+        let i = match self.table_state().selected() {
+            Some(i) => {
+                if i >= items_len - 1 {
+                    items_len - 1
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state().select(Some(i));
+    }
+    fn previous(&mut self) {
+        let i = match self.table_state().selected() {
+            Some(i) => {
+                if i == 0 {
+                    0
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state().select(Some(i));
+    }
+}
 
 pub trait UIRunner {
     fn handle_event(&mut self) -> io::Result<bool> {

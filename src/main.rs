@@ -64,6 +64,11 @@ async fn main() -> anyhow::Result<()> {
             ProjectCommands::Info(project_info_args) => {
                 project_info_args.show_info(&db_handler).await?;
             }
+            ProjectCommands::Ui => {
+                let projects = db_handler.get_projects().await?;
+                let mut ui = commands::project::project_ui::ProjectUI::new(projects, db_handler);
+                ui.run_ui()?;
+            }
         },
         Commands::Run(run) => match &mut run.run_commands {
             RunCommands::Action(run_action_args) => {

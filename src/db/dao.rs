@@ -5,7 +5,7 @@ use colored::Colorize;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, Clone)]
 pub struct Project {
     pub name: String,
     pub test_url: Option<String>,
@@ -50,7 +50,7 @@ impl From<&CreateProjectArgs> for Project {
     }
 }
 
-#[derive(sqlx::FromRow, Debug)]
+#[derive(sqlx::FromRow, Debug, Clone)]
 pub struct LightAction {
     pub name: String,
     pub url: String,

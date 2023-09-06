@@ -65,6 +65,7 @@ static PROJECT_NOT_FOUND: &str =
     "Project not found. Did you forget to create it running `qapi create-project <project_name>`?";
 static CONNECTION_ERROR: &str = "Connection to database failed";
 
+#[derive(Clone)]
 pub struct DBHandler {
     conn: Option<SqlitePool>,
 }
@@ -138,6 +139,13 @@ impl DBHandler {
         Ok(r)
     }
 
+    pub async fn get_projects(&self) -> anyhow::Result<(Vec<Project>)> {
+        let r = sqlx::query_as::<_, Project>("SELECT * FROM projects")
+            .fetch_all(self.get_conn())
+            .await?;
+        Ok(r)
+    }
+
     pub async fn list_projects(&self) -> anyhow::Result<()> {
         println!("{}", "Projects:".blue());
         sqlx::query("SELECT name FROM projects")
@@ -195,6 +203,21 @@ impl DBHandler {
             _ => println!("{}", "Action successfully added".yellow()),
         }
         Ok(())
+    }
+
+    pub async fn get_actions(&self, project_name: &str) -> anyhow::Result<Vec<LightAction>> {
+        let actions = sqlx::query_as::<_, LightAction>(
+            r#"
+            SELECT *
+            FROM actions a
+            WHERE a.project_name = ?1
+            "#,
+        )
+        .bind(project_name)
+        .fetch_all(self.get_conn())
+        .await?;
+
+        Ok(actions)
     }
 
     pub async fn get_action(&self, action_name: &str) -> anyhow::Result<LightAction> {

@@ -1,5 +1,5 @@
 use crate::db::dao::History;
-use crate::ui::run_ui::UIRunner;
+use crate::ui::run_ui::{StatefulTable, UIRunner};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{prelude::*, widgets::*};
 use std::io;
@@ -37,41 +37,12 @@ impl HistoryUI {
         }
     }
 
-    pub fn next(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.histories.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-    }
-
-    pub fn previous(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.histories.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-    }
-
     fn build_ui(&self) -> impl StatefulWidget<State = TableState> {
-        //, app: &mut App) {
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
         let normal_style = Style::default().bg(Color::Blue);
-        let header_cells = ["timestamp", "action name", "url", "status code", "duration"]
+        let header_cells = ["date", "action name", "url", "status code", "duration"]
             .iter()
-            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)));
+            .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)).bold());
         let header = Row::new(header_cells)
             .style(normal_style)
             .height(1)
@@ -92,17 +63,27 @@ impl HistoryUI {
         });
         let t = Table::new(rows)
             .header(header)
-            .block(Block::default().borders(Borders::ALL).title("Table"))
+            .block(Block::default().borders(Borders::ALL).title("History"))
             .highlight_style(selected_style)
-            .highlight_symbol(">> ")
+            //.highlight_symbol(">> ")
             .widths(&[
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
+                Constraint::Percentage(15),
+                Constraint::Percentage(15),
+                Constraint::Percentage(30),
                 Constraint::Percentage(20),
                 Constraint::Percentage(20),
             ]);
         t
+    }
+}
+
+impl StatefulTable for HistoryUI {
+    fn items_len(&self) -> usize {
+        self.histories.len()
+    }
+
+    fn table_state(&mut self) -> &mut TableState {
+        &mut self.state
     }
 }
 
