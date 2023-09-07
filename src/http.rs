@@ -5,7 +5,7 @@ use colored::Colorize;
 use log::debug;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-use crate::db::dao::{Context, History, LightAction};
+use crate::db::dto::{Context, History, Action};
 use crate::db::db_handler::DBHandler;
 use crate::{json_path, utils::replace_with_conf};
 
@@ -53,8 +53,8 @@ impl<'a> Api<'a> {
 
     fn interpolate_path_params(
         &self,
-        action: &LightAction,
-        project: &crate::db::dao::Project,
+        action: &Action,
+        project: &crate::db::dto::Project,
         params: &Option<HashMap<String, String>>,
         ctx: &HashMap<String, String>,
     ) -> String {
@@ -132,7 +132,7 @@ impl<'a> Api<'a> {
 
     pub async fn handle_result(
         &self,
-        light_action: &mut LightAction,
+        light_action: &mut Action,
         body: &Option<String>,
         result: &anyhow::Result<(String, u16, Duration)>,
         extract_pattern: &Option<HashMap<String, Option<String>>>,
@@ -254,7 +254,7 @@ impl<'a> Api<'a> {
 
     pub async fn run_action(
         &self,
-        action: &mut LightAction,
+        action: &mut Action,
         path_params: &Option<HashMap<String, String>>,
         query_params: &Option<HashMap<String, String>>,
         body: &Option<String>,

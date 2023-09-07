@@ -13,6 +13,9 @@ pub struct History {
 
 #[derive(Subcommand)]
 pub enum HistoryCommands {
-    /// Run an action
+    /// Show history
     List(HistoryArgs),
+    /// Run history ui
+    Ui
+
 }

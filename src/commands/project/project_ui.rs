@@ -1,4 +1,4 @@
-use crate::db::dao::{LightAction, Project};
+use crate::db::dto::{Action, Project};
 use crate::db::db_handler::DBHandler;
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
@@ -8,6 +8,7 @@ use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 use std::{io, thread};
 use tokio::runtime::Handle;
+use crate::utils::random_emoji;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ActiveArea {
@@ -28,7 +29,7 @@ pub(crate) struct ProjectUI {
     db: DBHandler,
     active_area: ActiveArea,
     projects: StatefulList<Project>,
-    actions: StatefulList<LightAction>,
+    actions: StatefulList<Action>,
     body_example_scroll: u16,
     response_example_scroll: u16,
 }
@@ -93,16 +94,19 @@ impl ProjectUI {
                 .items
                 .iter()
                 .map(|p| {
+                    let mut conf_keys = p
+                        .get_conf()
+                        .keys()
+                        .map(String::to_string)
+                        .collect::<Vec<_>>();
+                    conf_keys.sort();
                     ListItem::new(vec![
                         Line::styled(
                             format!(
-                                " 💫 {}({})",
+                                " {} {}({})",
+                                random_emoji(),
                                 p.name.clone(),
-                                p.get_conf()
-                                    .keys()
-                                    .map(String::to_string)
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
+                                conf_keys.join(", ")
                             ),
                             Style::default().fg(Color::LightGreen).bold(),
                         ),
@@ -125,7 +129,7 @@ impl ProjectUI {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(self.get_color(ActiveArea::ProjectPane))),
         )
-        .highlight_style(Style::default().fg(Color::Yellow))
+        .highlight_style(Style::default().fg(Color::White))
         .highlight_symbol(">>");
 
         // rendering
@@ -173,7 +177,7 @@ impl ProjectUI {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(self.get_color(ActiveArea::ActionPane))),
         )
-        .highlight_style(Style::default().fg(Color::Yellow))
+        .highlight_style(Style::default().fg(Color::White))
         .highlight_symbol(">>");
 
         frame.render_stateful_widget(action_list, right_layout[0], &mut self.actions.state);

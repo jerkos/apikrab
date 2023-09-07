@@ -1,13 +1,10 @@
 use std::collections::HashMap;
+use rand::*;
 
 pub fn replace_with_conf(str: &str, conf: &HashMap<String, String>) -> String {
     conf.iter().fold(str.to_string(), |acc, (k, v)| {
         acc.replace(format!("{{{k}}}", k = k).as_str(), v)
     })
-}
-
-pub fn deserialize<'a, T: serde::Deserialize<'a>>(data: &'a str) -> T {
-    serde_json::from_str::<T>(data).expect("Invalid configuration")
 }
 
 /// Parse a conf string to a hashmap
@@ -43,4 +40,9 @@ pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<String, String>>
             Some(path_value_by_name)
         }
     }
+}
+
+pub fn random_emoji() -> char {
+    let x: u32 = thread_rng().gen_range(0x1F600..0x1F64F);
+    char::from_u32(x).unwrap_or('💔')
 }

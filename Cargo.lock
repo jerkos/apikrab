@@ -1974,6 +1974,7 @@ dependencies = [
  "either",
  "env_logger",
  "log",
+ "rand",
  "ratatui",
  "reqwest",
  "serde",

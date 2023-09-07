@@ -10,7 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
-use crate::db::db_handler::DBHandler;
+use crate::commands::flow::{Flow, FlowCommands};
+use crate::db::db_handler::{DBHandler};
 use crate::ui::run_ui::UIRunner;
 
 #[derive(Parser)]
@@ -25,10 +26,16 @@ struct Cli {
 enum Commands {
     /// Create or update a new project with specified parameters
     Project(Project),
-    // Add action to a specified url
+
+    /// Add action to a specified url
     Run(Run),
-    // history
+
+    /// Flow information
+    Flow(Flow),
+
+    /// List all history call
     History(History),
+
 }
 
 #[derive(Args)]
@@ -49,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
     let mut cli: Cli = Cli::parse();
     match &mut cli.command {
         Commands::Project(project) => match &mut project.project_commands {
-            ProjectCommands::Create(create_project_args) => {
+            ProjectCommands::New(create_project_args) => {
                 create_project_args.create(&db_handler).await?;
             }
             ProjectCommands::RmAction(rm_action_args) => {
@@ -74,12 +81,23 @@ async fn main() -> anyhow::Result<()> {
             RunCommands::Action(run_action_args) => {
                 run_action_args.run_action(&requester).await?;
             }
+            RunCommands::Flow(run_flow_args) => {
+                run_flow_args.run_flow(&db_handler, &requester).await?;
+            }
+        },
+        Commands::Flow(flow) => match &mut flow.flow_commands {
+            FlowCommands::List(flow_list_args) => {
+                flow_list_args.list_flows(&db_handler).await?;
+            }
         },
         Commands::History(history) => match &mut history.history_commands {
-            HistoryCommands::List(history_args) => {
-                let histories = db_handler.get_history().await?;
+            HistoryCommands::Ui => {
+                let histories = db_handler.get_history(None).await?;
                 let mut ui = commands::history::list_ui::HistoryUI::new(histories);
                 ui.run_ui()?;
+            }
+            HistoryCommands::List(list_args) => {
+                list_args.list_history(&db_handler).await?;
             }
         },
     }

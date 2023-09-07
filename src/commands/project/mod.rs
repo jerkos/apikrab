@@ -22,14 +22,15 @@ pub struct Project {
 #[derive(Subcommand)]
 pub enum ProjectCommands {
     /// Create a new project
-    Create(CreateProjectArgs),
-    // Add action
+    New(CreateProjectArgs),
+    /// Add action to the specified project
     AddAction(AddActionArgs),
+    /// Remove action from the specified project
     RmAction(RmActionArgs),
-    // Get information about a project
+    /// Get information about a project
     Info(ProjectInfoArgs),
-    // list projects
+    /// list projects
     List(ListProjects),
-
+    /// Run project ui
     Ui,
 }

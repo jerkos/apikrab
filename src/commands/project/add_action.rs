@@ -1,4 +1,4 @@
-use crate::db::dao::LightAction;
+use crate::db::dto::Action;
 use crate::db::db_handler::DBHandler;
 use clap::Args;
 
@@ -34,7 +34,7 @@ pub struct AddActionArgs {
 
 impl AddActionArgs {
     pub async fn add_action(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
-        let light_action: LightAction = self.into();
+        let light_action: Action = self.into();
         db_handler.upsert_action(&light_action).await?;
         Ok(())
     }

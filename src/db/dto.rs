@@ -4,6 +4,7 @@ use crate::utils::parse_conf_to_map;
 use colored::Colorize;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use crate::commands::run::action::RunActionArgs;
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct Project {
@@ -51,7 +52,7 @@ impl From<&CreateProjectArgs> for Project {
 }
 
 #[derive(sqlx::FromRow, Debug, Clone)]
-pub struct LightAction {
+pub struct Action {
     pub name: String,
     pub url: String,
     pub verb: String,
@@ -62,17 +63,17 @@ pub struct LightAction {
     pub project_name: String,
 }
 
-impl LightAction {
+impl Action {
     pub fn headers_as_map(&self) -> HashMap<String, String> {
         serde_json::from_str(&self.headers).expect("Error deserializing headers")
     }
 
     pub fn is_form(&self) -> bool {
-        self.headers_as_map().get("Content-Type").unwrap_or(&"".to_string()) == "application/x-www-form-urlencoded"
+        self.headers_as_map().get(reqwest::header::CONTENT_TYPE.as_str()).unwrap_or(&"".to_string()) == "application/x-www-form-urlencoded"
     }
 }
 
-impl From<&AddActionArgs> for LightAction {
+impl From<&AddActionArgs> for Action {
     fn from(value: &AddActionArgs) -> Self {
         let mut headers = parse_conf_to_map(&value.header);
         if value.form {
@@ -82,7 +83,7 @@ impl From<&AddActionArgs> for LightAction {
             );
         }
         let headers_as_str = serde_json::to_string(&headers).expect("Error serializing headers");
-        LightAction {
+        Action {
             name: value.name.clone(),
             url: value.url.clone(),
             verb: value.verb.clone(),
@@ -95,7 +96,7 @@ impl From<&AddActionArgs> for LightAction {
     }
 }
 
-impl Display for LightAction {
+impl Display for Action {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -145,5 +146,24 @@ impl Display for History {
             self.status_code.to_string().yellow(),
             self.duration,
         )
+    }
+}
+
+
+#[derive(sqlx::FromRow)]
+pub struct Flow {
+    pub name: String,
+    pub run_action_args: String,
+}
+
+impl Flow {
+    pub fn de_run_action_args(&self) -> RunActionArgs {
+        serde_json::from_str::<RunActionArgs>(self.run_action_args.as_str()).unwrap()
+    }
+}
+
+impl Display for Flow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}, {}", self.name, self.run_action_args)
     }
 }

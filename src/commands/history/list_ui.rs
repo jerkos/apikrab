@@ -1,4 +1,4 @@
-use crate::db::dao::History;
+use crate::db::dto::History;
 use crate::ui::run_ui::{StatefulTable, UIRunner};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{prelude::*, widgets::*};
@@ -37,6 +37,20 @@ impl HistoryUI {
         }
     }
 
+    fn to_readable_str(&self, datetime: &chrono::NaiveDateTime) -> String {
+        let now = chrono::Local::now().naive_local();
+        let duration = now - *datetime;
+        return if duration < chrono::Duration::minutes(1) {
+            format!("Just now, {}", datetime.format("%H:%M"))
+        } else if duration < chrono::Duration::hours(1) {
+            format!("{} minutes ago, {}", duration.num_minutes(), datetime.format("%H:%M"))
+        } else if duration < chrono::Duration::days(1) {
+            format!("{} hours ago, {}", duration.num_hours(), datetime.format("%H:%M"))
+        } else {
+            format!("{} day{} ago, {}", duration.num_days(), if duration.num_days() > 1 { "s" } else { "" }, datetime.format("%Y-%m-%d"))
+        }
+    }
+
     fn build_ui(&self) -> impl StatefulWidget<State = TableState> {
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
         let normal_style = Style::default().bg(Color::Blue);
@@ -55,7 +69,7 @@ impl HistoryUI {
                 duration: item.duration.to_string(),
                 timestamp: item
                     .timestamp
-                    .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .map(|t| self.to_readable_str(&t))
                     .unwrap_or("".to_string()),
             };
 

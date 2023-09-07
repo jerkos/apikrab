@@ -1,4 +1,5 @@
-mod action;
+pub(crate) mod action;
+mod flow;
 
 use clap::{Args, Subcommand};
 
@@ -14,4 +15,6 @@ pub struct Run {
 pub enum RunCommands {
     /// Run an action
     Action(RunActionArgs),
+
+    Flow(flow::RunFlowArgs),
 }

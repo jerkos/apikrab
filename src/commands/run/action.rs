@@ -3,8 +3,9 @@ use crate::utils::{parse_multiple_conf, parse_multiple_conf_as_opt};
 use clap::Args;
 use log::debug;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-#[derive(Args)]
+#[derive(Args, Serialize, Deserialize, Debug, Clone)]
 pub struct RunActionArgs {
     // action name
     name: String,
@@ -35,7 +36,7 @@ pub struct RunActionArgs {
 
     // force action rerun even if its extracted value exists in current context
     #[arg(long)]
-    force: bool,
+    pub force: bool,
 
     // print the output of the command
     #[arg(long)]
@@ -117,6 +118,7 @@ impl RunActionArgs {
         Ok(())
     }
     pub async fn run_action<'a>(&'a mut self, requester: &'a http::Api<'_>) -> anyhow::Result<()> {
+        let cloned = self.clone();
         // creating a new context hashmap for storing extracted values
         let mut ctx: HashMap<String, String> = match requester.db_handler.get_conf().await {
             Ok(ctx) => ctx.get_value(),
@@ -214,15 +216,13 @@ impl RunActionArgs {
                 .await?;
         }
 
-        if is_chained_action && self.save_as.is_some() {
+        // save as requested
+        if self.save_as.is_some() {
             requester
                 .db_handler
                 .upsert_flow(
                     self.save_as.as_ref().unwrap(),
-                    &self.chain.as_ref().unwrap(),
-                    &self.body,
-                    &self.path_params,
-                    &self.extract_path,
+                    &cloned,
                 )
                 .await?;
         }

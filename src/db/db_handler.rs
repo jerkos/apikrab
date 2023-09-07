@@ -1,16 +1,10 @@
-use crate::db::dao::{Context, History, LightAction, Project};
+use std::fmt::Display;
+use crate::db::dto::{Context, History, Action, Project, Flow};
 use colored::Colorize;
-use sqlx::{sqlite::SqlitePool, Executor, Row};
+use sqlx::{sqlite::SqlitePool, Executor};
+use crate::commands::run::action::RunActionArgs;
 
-#[derive(sqlx::FromRow)]
-pub struct Flow {
-    pub name: String,
-    pub actions: String,
-    // list of action names
-    pub bodies: Option<String>,
-    pub path_params: Option<String>,
-    pub extracted_path: Option<String>,
-}
+
 
 static INIT_TABLES: &str = r#"
 BEGIN TRANSACTION;
@@ -34,10 +28,7 @@ CREATE TABLE actions (
 );
 CREATE TABLE flows (
     name PRIMARY KEY,
-    actions TEXT NOT NULL,
-    bodies TEXT,
-    path_params TEXT,
-    extracted_path TEXT
+    run_action_args TEXT
 );
 CREATE TABLE history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,6 +41,16 @@ CREATE TABLE history (
     duration REAL NOT NULL,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(action_name) REFERENCES actions(name)
+);
+CREATE TABLE test_suite (
+    name PRIMARY_KEY,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE test_suite_step(
+    test_suite_name TEXT NOT NULL,
+    history_id INTEGER NOT NULL,
+    FOREIGN KEY(test_suite_name) REFERENCES test_suite(name),
+    FOREIGN KEY(history_id) REFERENCES actions(name)
 );
 
 CREATE TABLE context (
@@ -146,38 +147,8 @@ impl DBHandler {
         Ok(r)
     }
 
-    pub async fn list_projects(&self) -> anyhow::Result<()> {
-        println!("{}", "Projects:".blue());
-        sqlx::query("SELECT name FROM projects")
-            .fetch_all(self.get_conn())
-            .await?
-            .into_iter()
-            .for_each(|project| println!("{}", project.get::<String, _>(0)));
-        Ok(())
-    }
 
-    /// list information about a project i.e. its configured urls and associated actions
-    pub async fn list_project_data(&self, project_name: &str) -> anyhow::Result<()> {
-        let project = self.get_project(project_name).await?;
-
-        println!("{}", "Configured actions:".yellow());
-        sqlx::query_as::<_, LightAction>(
-            r#"
-            SELECT *
-            FROM actions
-            WHERE project_name = ?1
-            "#,
-        )
-        .bind(project.name)
-        .fetch_all(self.get_conn())
-        .await?
-        .iter()
-        .for_each(|light_action| println!("{}", light_action.to_string()));
-
-        Ok(())
-    }
-
-    pub async fn upsert_action(&self, light_action: &LightAction) -> anyhow::Result<()> {
+    pub async fn upsert_action(&self, light_action: &Action) -> anyhow::Result<()> {
         let r = sqlx::query(
             r#"
             INSERT INTO actions (name, url, verb, static_body, headers, body_example, response_example, project_name)
@@ -205,8 +176,8 @@ impl DBHandler {
         Ok(())
     }
 
-    pub async fn get_actions(&self, project_name: &str) -> anyhow::Result<Vec<LightAction>> {
-        let actions = sqlx::query_as::<_, LightAction>(
+    pub async fn get_actions(&self, project_name: &str) -> anyhow::Result<Vec<Action>> {
+        let actions = sqlx::query_as::<_, Action>(
             r#"
             SELECT *
             FROM actions a
@@ -220,8 +191,8 @@ impl DBHandler {
         Ok(actions)
     }
 
-    pub async fn get_action(&self, action_name: &str) -> anyhow::Result<LightAction> {
-        let action = sqlx::query_as::<_, LightAction>(
+    pub async fn get_action(&self, action_name: &str) -> anyhow::Result<Action> {
+        let action = sqlx::query_as::<_, Action>(
             r#"
             SELECT *
             FROM actions a
@@ -250,42 +221,50 @@ impl DBHandler {
         Ok(r)
     }
 
-    pub async fn get_flow(&self, flow_name: &str) -> anyhow::Result<Flow> {
-        let flow = sqlx::query_as::<_, Flow>(
+    pub async fn get_flows(&self) -> anyhow::Result<Vec<Flow>> {
+        let r = sqlx::query_as::<_, Flow>(
             r#"
-            SELECT name, actions, bodies, path_params, extracted_path
+            SELECT *
+            FROM flows
+            "#,
+        )
+        .fetch_all(self.get_conn())
+        .await?;
+        Ok(r)
+    }
+
+    pub async fn get_flow(&self, flow_name: &str) -> anyhow::Result<Flow> {
+        let r = sqlx::query_as::<_, Flow>(
+            r#"
+            SELECT *
             FROM flows
             WHERE name = ?1
             "#,
         )
         .bind(flow_name)
         .fetch_one(self.get_conn())
-        .await?;
-
-        Ok(flow)
+        .await;
+        match r {
+            Ok(flow) => Ok(flow),
+            Err(..) => anyhow::bail!("Flow not found"),
+        }
     }
 
     pub async fn upsert_flow(
         &self,
         flow_name: &str,
-        actions: &Vec<String>,
-        bodies: &Option<Vec<String>>,
-        path_params: &Option<Vec<String>>,
-        extracted_path: &Option<Vec<String>>,
+        run_action_args: &RunActionArgs,
     ) -> anyhow::Result<()> {
         let r = sqlx::query(
             r#"
-            INSERT INTO flows (name, actions, bodies, path_params, extracted_path)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO flows (name, run_action_args)
+            VALUES (?1, ?2)
             ON CONFLICT (name)
-            DO UPDATE SET actions = ?2, bodies = ?3, path_params = ?4, extracted_path = ?5;
+            DO UPDATE SET run_action_args = ?2;
             "#,
         )
         .bind(flow_name)
-        .bind(serde_json::to_string(&actions)?)
-        .bind(serde_json::to_string(&bodies)?)
-        .bind(serde_json::to_string(&path_params)?)
-        .bind(serde_json::to_string(&extracted_path)?)
+        .bind(serde_json::to_string(run_action_args)?)
         .execute(self.get_conn())
         .await?
         .last_insert_rowid();
@@ -347,14 +326,16 @@ impl DBHandler {
         Ok(r)
     }
 
-    pub async fn get_history(&self) -> anyhow::Result<Vec<History>> {
+    pub async fn get_history(&self, limit: Option<u16>) -> anyhow::Result<Vec<History>> {
+        let _limit = limit.unwrap_or(20);
         let history = sqlx::query_as::<_, History>(
+            format!(
             r#"
             SELECT *
             FROM history
             ORDER BY timestamp DESC
-            limit 20;
-            "#,
+            limit {};
+            "#, _limit).as_str()
         )
         .fetch_all(self.get_conn())
         .await?;
