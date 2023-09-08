@@ -1,11 +1,11 @@
-# apicrab
+# 😁🦀 apicrab
 CLI tools to manage your json api call in the terminal for fun only !
 
-Written in rust 🦀
-
-Tested on MacOs only
+> [!WARNING]
+> Tested on MacOs only
 
 ## Philosophy
+
 The goal of this project is to provide a simple tool to manage your json api call in the
 terminal. It's not meant to be used in production. It's just a fun project to learn rust.
 
@@ -13,14 +13,13 @@ First notion is the **project**. A project has a name and root urls for an api t
 optionally a set of **configuration variables**. You can then attach **actions** to your
 project.
 
-An action represents a specific endpoint of your api. It has a name, a method (http verb), 
+An **action** represents a specific endpoint of your api. It has a name, a method (http verb), 
 an url.
 
-You can run an action with a set of **parameters**. A parameter is a key value pair. The key
-is the name of the parameter, the value is the value of the parameter. The value can be a
-string or a json object, just as Curl.
+You can run an action with a set of **parameters** such body, path parameters, and query 
+parameters.
 
-A **flow** represents a set of actions to run with predefined parameters. You can chain 
+A **flow** represents a set of actions to run with predefined parameters. You also can chain 
 actions to create a flow.
 
 ## Features
@@ -64,7 +63,7 @@ apicrab project new myproject --test-url https://jsonplaceholder.typicode.com
 
 Add an action to your project
 ```bash
-apicrab project add-action myproject get-todo -v GET --url /todos/{id}
+apicrab project add-action myproject -n get-todo -v GET --url /todos/{id}
 ```
 
 Run your action
@@ -84,6 +83,27 @@ Received response:
 }
 ...
 ```
+
+Chain action
+```
+# project as been created with configuration parameters CLIENT_ID and CLIENT_SECRET
+apicrab project add-action myproject -n authent\n
+--static-body '{client_id:"{CLIENT_ID}", "client_secret": "{CLIENT_SECRET", "grant-type": "client_credentials"}' \n
+-u oauth/token --form
+
+apicrab project add-action myproject -n search_by_name\n
+-u todos?name={name}
+-h 'Authorization: Bearer {ACCESS_TOKEN}'
+
+apicrab run action authent -q '' -e access_token:ACCESS_TOKEN\n
+--chain search_by_name -q 'name:Buy tomatoes' -e $ --save-as get-todo-by-name-flow
+
+apicrab run flow get-todo-by-name-flow
+
+```
+
+
+
 
 Extract data from your response using jsonpath (not fully implemented yet)
 ```bash
@@ -109,7 +129,7 @@ apicrab run flow get-todo
 Flow are especially useful to test your api. You can add expectations to your flow.
 ```bash
 apicrab test-suite new mytest
-apicrab test-suite add-flow mytest get-todo --expect COMPLETED:false --expect STATUS_CODE:200
+apicrab test-suite add-flow mytest -n get-todo --expect COMPLETED:false --expect STATUS_CODE:200
 
 apicrab run test-suite mytest
 ```
