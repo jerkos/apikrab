@@ -7,7 +7,8 @@ CLI tools to manage your json api call in the terminal for fun only !
 ## Philosophy
 
 The goal of this project is to provide a simple tool to manage your json api call in the
-terminal. It's not meant to be used in production. It's just a fun project to learn rust.
+terminal. It is still in very early stage of development and is not intended to be used in
+production.
 
 First notion is the **project**. A project has a name and root urls for an api to test, and
 optionally a set of **configuration variables**. You can then attach **actions** to your
@@ -19,8 +20,12 @@ an url.
 You can run an action with a set of **parameters** such body, path parameters, and query 
 parameters.
 
-A **flow** represents a set of actions to run with predefined parameters. You also can chain 
-actions to create a flow.
+A **flow** represents an action or chained actions to run with predefined parameters.
+
+Finally, a **test suite** is a set of flows with expectations. You can run a test suite to
+check if your api is still working as expected.
+
+Some commands have an ui mode (history, project info). See the help for more information.
 
 ## Features
 - [x] Create a new project
@@ -52,6 +57,12 @@ export PATH=$PATH:/path/to/apicrab/target/release
 ```bash
 apicrab --help
 ```
+Works also for subcommand:
+```bash
+apicrab project --help
+```
+![Help view](img/help.png "Help view")
+
 
 ## Example
 
@@ -170,6 +181,7 @@ Gives the following output
 - [ ] Add a way to save your project in a file
 - [ ] Add a way to load your project from a file
 - [ ] Share your project with others
+- [ ] Extend expectation mechanisms (regex, jsonpath, include, ...)
 - [ ] Improve the ui
 
 
