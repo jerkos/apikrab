@@ -1,14 +1,14 @@
-use crate::db::dto::{Action, Project};
 use crate::db::db_handler::DBHandler;
+use crate::db::dto::{Action, Project};
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
+use crate::utils::random_emoji;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 use std::{io, thread};
 use tokio::runtime::Handle;
-use crate::utils::random_emoji;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ActiveArea {
@@ -156,16 +156,27 @@ impl ProjectUI {
                         Line::from(vec![
                             Span::raw("    "),
                             match a.verb.as_str() {
-                                "POST" => Span::styled(a.verb.clone(), Style::default().fg(Color::DarkGray).bg(Color::Green)),
-                                "GET" => Span::styled(a.verb.clone(), Style::default().fg(Color::DarkGray).bg(Color::Blue)),
-                                _ => Span::styled(a.verb.clone(), Style::default().fg(Color::DarkGray).bg(Color::Red)),
+                                "POST" => Span::styled(
+                                    a.verb.clone(),
+                                    Style::default().fg(Color::DarkGray).bg(Color::Green),
+                                ),
+                                "GET" => Span::styled(
+                                    a.verb.clone(),
+                                    Style::default().fg(Color::DarkGray).bg(Color::Blue),
+                                ),
+                                _ => Span::styled(
+                                    a.verb.clone(),
+                                    Style::default().fg(Color::DarkGray).bg(Color::Red),
+                                ),
                             },
                             Span::raw(" "),
                             Span::styled(a.url.clone(), Style::default().fg(Color::LightBlue)),
                             Span::raw(" "),
-                            Span::styled(if a.is_form() { "(form)" } else { "(json)" }, Style::default().fg(Color::DarkGray)),
-                        ]
-                        ),
+                            Span::styled(
+                                if a.is_form() { "(form)" } else { "(json)" },
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]),
                     ])
                 })
                 .collect::<Vec<_>>(),

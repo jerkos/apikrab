@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use rand::*;
+use std::collections::HashMap;
 
 pub fn replace_with_conf(str: &str, conf: &HashMap<String, String>) -> String {
     conf.iter().fold(str.to_string(), |acc, (k, v)| {
@@ -21,12 +21,29 @@ pub fn parse_conf_to_map(conf: &Option<Vec<String>>) -> HashMap<String, String> 
 }
 
 pub fn parse_multiple_conf(conf: &str) -> HashMap<String, String> {
-    conf.split(',')
+    if conf.contains(",") && !conf.contains("{") {
+        return conf
+            .split(',')
+            .map(|s| {
+                let mut split = s.split(":");
+                (
+                    split.next().unwrap().to_string(),
+                    split.next().unwrap().to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+    }
+    serde_json::from_str(conf).expect("Error deserializing conf")
+}
+
+/// only for extracted path
+pub fn parse_multiple_conf_with_opt(conf: &str) -> HashMap<String, Option<String>> {
+    conf.split(",")
         .map(|s| {
             let mut split = s.split(":");
             (
                 split.next().unwrap().to_string(),
-                split.next().unwrap().to_string(),
+                split.next().map(String::from),
             )
         })
         .collect::<HashMap<_, _>>()
@@ -40,6 +57,13 @@ pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<String, String>>
             Some(path_value_by_name)
         }
     }
+}
+
+pub fn get_str_as_interpolated_map(
+    data: &str,
+    ctx: &HashMap<String, String>,
+) -> Option<HashMap<String, String>> {
+    parse_multiple_conf_as_opt(&replace_with_conf(data, ctx))
 }
 
 pub fn random_emoji() -> char {

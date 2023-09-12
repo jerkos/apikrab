@@ -43,12 +43,25 @@ impl HistoryUI {
         return if duration < chrono::Duration::minutes(1) {
             format!("Just now, {}", datetime.format("%H:%M"))
         } else if duration < chrono::Duration::hours(1) {
-            format!("{} minutes ago, {}", duration.num_minutes(), datetime.format("%H:%M"))
+            format!(
+                "{} minutes ago, {}",
+                duration.num_minutes(),
+                datetime.format("%H:%M")
+            )
         } else if duration < chrono::Duration::days(1) {
-            format!("{} hours ago, {}", duration.num_hours(), datetime.format("%H:%M"))
+            format!(
+                "{} hours ago, {}",
+                duration.num_hours(),
+                datetime.format("%H:%M")
+            )
         } else {
-            format!("{} day{} ago, {}", duration.num_days(), if duration.num_days() > 1 { "s" } else { "" }, datetime.format("%Y-%m-%d"))
-        }
+            format!(
+                "{} day{} ago, {}",
+                duration.num_days(),
+                if duration.num_days() > 1 { "s" } else { "" },
+                datetime.format("%Y-%m-%d")
+            )
+        };
     }
 
     fn build_ui(&self) -> impl StatefulWidget<State = TableState> {

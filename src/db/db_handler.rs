@@ -1,10 +1,8 @@
-use std::fmt::Display;
-use crate::db::dto::{Context, History, Action, Project, Flow};
+use crate::commands::run::action::RunActionArgs;
+use crate::db::dto::{Action, Context, Flow, History, Project, TestSuite, TestSuiteInstance};
 use colored::Colorize;
 use sqlx::{sqlite::SqlitePool, Executor};
-use crate::commands::run::action::RunActionArgs;
-
-
+use std::fmt::Display;
 
 static INIT_TABLES: &str = r#"
 BEGIN TRANSACTION;
@@ -27,7 +25,7 @@ CREATE TABLE actions (
     CONSTRAINT unique_action UNIQUE (name, project_name)
 );
 CREATE TABLE flows (
-    name PRIMARY KEY,
+    name TEXT PRIMARY KEY,
     run_action_args TEXT
 );
 CREATE TABLE history (
@@ -43,14 +41,16 @@ CREATE TABLE history (
     FOREIGN KEY(action_name) REFERENCES actions(name)
 );
 CREATE TABLE test_suite (
-    name PRIMARY_KEY,
+    name TEXT PRIMARY KEY,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE test_suite_step(
+CREATE TABLE test_suite_steps(
     test_suite_name TEXT NOT NULL,
-    history_id INTEGER NOT NULL,
-    FOREIGN KEY(test_suite_name) REFERENCES test_suite(name),
-    FOREIGN KEY(history_id) REFERENCES actions(name)
+    flow_name TEXT NOT NULL,
+    expect TEXT NOT NULL,
+    FOREIGN KEY(test_suite_name) REFERENCES test_suite(name)
+    FOREIGN KEY(flow_name) REFERENCES flows(name)
+    PRIMARY KEY(test_suite_name, flow_name)
 );
 
 CREATE TABLE context (
@@ -146,7 +146,6 @@ impl DBHandler {
             .await?;
         Ok(r)
     }
-
 
     pub async fn upsert_action(&self, light_action: &Action) -> anyhow::Result<()> {
         let r = sqlx::query(
@@ -330,16 +329,101 @@ impl DBHandler {
         let _limit = limit.unwrap_or(20);
         let history = sqlx::query_as::<_, History>(
             format!(
-            r#"
+                r#"
             SELECT *
             FROM history
             ORDER BY timestamp DESC
             limit {};
-            "#, _limit).as_str()
+            "#,
+                _limit
+            )
+            .as_str(),
         )
         .fetch_all(self.get_conn())
         .await?;
 
         Ok(history)
+    }
+
+    pub async fn upsert_test_suite(&self, test_suite_name: &str) -> anyhow::Result<()> {
+        let r = sqlx::query(
+            r#"
+            INSERT INTO test_suite (name)
+            VALUES (?1)
+            ON CONFLICT
+            DO NOTHING;
+            "#,
+        )
+        .bind(test_suite_name)
+        .execute(self.get_conn())
+        .await?
+        .last_insert_rowid();
+
+        match r {
+            0 => println!("{}", "Test suite updated".blue()),
+            _ => println!("{}", "Test suite successfully added".yellow()),
+        }
+        Ok(())
+    }
+
+    pub async fn get_test_suite(&self, test_suite_name: &str) -> anyhow::Result<TestSuite> {
+        let r = sqlx::query_as::<_, TestSuite>(
+            r#"
+            SELECT *
+            FROM test_suite
+            WHERE name = ?1
+            "#,
+        )
+        .bind(test_suite_name)
+        .fetch_one(self.get_conn())
+        .await;
+        match r {
+            Ok(test_suite) => Ok(test_suite),
+            Err(..) => anyhow::bail!("Flow not found"),
+        }
+    }
+
+    pub async fn upsert_test_suite_instance(
+        &self,
+        test_suite_instance: &TestSuiteInstance,
+    ) -> anyhow::Result<()> {
+        let r = sqlx::query(
+            r#"
+            INSERT INTO test_suite_steps (test_suite_name, flow_name, expect)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT (test_suite_name, flow_name)
+            DO UPDATE SET expect = ?3;
+            "#,
+        )
+        .bind(&test_suite_instance.test_suite_name)
+        .bind(&test_suite_instance.flow_name)
+        .bind(&test_suite_instance.expect)
+        .execute(self.get_conn())
+        .await?
+        .last_insert_rowid();
+
+        match r {
+            0 => println!("{}", "Test suite step updated".blue()),
+            _ => println!("{}", "Test suite step successfully added".yellow()),
+        }
+        Ok(())
+    }
+
+    pub async fn get_test_suite_instance(
+        &self,
+        test_suite_name: &str,
+    ) -> anyhow::Result<Vec<TestSuiteInstance>> {
+        let r = sqlx::query_as::<_, TestSuiteInstance>(
+            r#"
+            SELECT *
+            FROM test_suite_steps
+            WHERE test_suite_name = ?1
+            "#,
+        )
+        .bind(test_suite_name)
+        .fetch_all(self.get_conn())
+        .await?;
+
+        Ok(r)
     }
 }

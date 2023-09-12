@@ -1,5 +1,8 @@
+mod _http_result;
+mod _test_checker;
 pub(crate) mod action;
 mod flow;
+mod test_suite;
 
 use clap::{Args, Subcommand};
 
@@ -17,4 +20,6 @@ pub enum RunCommands {
     Action(RunActionArgs),
 
     Flow(flow::RunFlowArgs),
+
+    TestSuite(test_suite::TestSuiteArgs),
 }

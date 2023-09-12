@@ -1,49 +1,135 @@
+use crate::commands::run::_http_result::HttpResult;
+use crate::db::dto::Action;
 use crate::http;
-use crate::utils::{parse_multiple_conf, parse_multiple_conf_as_opt};
+use crate::http::FetchResult;
+use crate::utils::{
+    get_str_as_interpolated_map, parse_multiple_conf, parse_multiple_conf_as_opt,
+    parse_multiple_conf_with_opt, replace_with_conf,
+};
 use clap::Args;
-use log::debug;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub struct R {
+    pub result: anyhow::Result<FetchResult>,
+    pub ctx: HashMap<String, String>,
+}
 
 #[derive(Args, Serialize, Deserialize, Debug, Clone)]
 pub struct RunActionArgs {
-    // action name
+    /// action name
     name: String,
 
-    // path params separated by a ,
+    /// path params separated by a ,
     #[arg(short, long)]
     path_params: Option<Vec<String>>,
 
-    // query params separated by a ,
+    /// query params separated by a ,
     #[arg(short, long)]
     query_params: Option<Vec<String>>,
 
-    // body of the action
+    /// body of the action
     #[arg(short, long)]
     body: Option<Vec<String>>,
 
-    // extract path of the response
+    /// extract path of the response
     #[arg(short, long)]
     extract_path: Option<Vec<String>>,
 
-    // chain with another action
+    /// chain with another action
     #[arg(short, long)]
     chain: Option<Vec<String>>,
 
-    // save command line as flow
+    /// save command line as flow
     #[arg(long)]
     save_as: Option<String>,
 
-    // force action rerun even if its extracted value exists in current context
+    /// force action rerun even if its extracted value exists in current context
     #[arg(long)]
     pub force: bool,
 
-    // print the output of the command
+    /// print the output of the command
     #[arg(long)]
-    no_print: bool,
+    pub no_print: bool,
 }
 
 impl RunActionArgs {
+    pub fn get_computed_body(
+        &self,
+        body: &str,
+        action: &Action,
+        ctx: &HashMap<String, String>,
+    ) -> Option<String> {
+        let body_as_map = match body {
+            // if static body exists, use it otherwise None is used
+            "" => action.static_body.as_ref().map(|s| s.to_string()),
+            "LAST_SUCCESSFUL_BODY" => {
+                let last_successful_body = action
+                    .body_example
+                    .as_ref()
+                    .expect("No last successful body found!");
+                Some(last_successful_body.to_string())
+            }
+            _ => {
+                // todo handle other deserialization values than hashmap
+                serde_json::from_str::<HashMap<String, String>>(body)
+                    .ok()
+                    .map(|_| body.to_string())
+                    .or_else(|| {
+                        let as_map = parse_multiple_conf(body);
+                        Some(serde_json::to_string(&as_map).unwrap())
+                    })
+            }
+        };
+        body_as_map
+            .as_ref()
+            .map(|body| replace_with_conf(body, ctx))
+            .or(Some(body.to_owned()))
+    }
+
+    pub fn get_computed_url(
+        path_params: &str,
+        project_url: &str,
+        action_url: &str,
+        ctx: &HashMap<String, String>,
+    ) -> String {
+        let path_params_as_map = parse_multiple_conf_as_opt(path_params);
+        let full_url = format!("{}/{}", project_url, action_url);
+        path_params_as_map
+            .as_ref()
+            .map(|path_params| replace_with_conf(&full_url, &path_params))
+            .map(|full_url| replace_with_conf(&full_url, ctx))
+            .unwrap_or_else(|| replace_with_conf(&full_url, ctx))
+    }
+
+    pub fn get_computed_extracted_path(
+        &self,
+        extracted_path: &str,
+        ctx: &HashMap<String, String>,
+    ) -> Option<HashMap<String, Option<String>>> {
+        match extracted_path {
+            "" => None,
+            _ => {
+                let value = parse_multiple_conf_with_opt(extracted_path);
+
+                let all_values = value
+                    .values()
+                    .filter_map(|v| v.as_ref())
+                    .map(|v| ctx.contains_key(v))
+                    .collect::<Vec<_>>();
+
+                let needs_to_continue = all_values.iter().all(|v| *v);
+                if !all_values.is_empty() && needs_to_continue && !self.force {
+                    println!(
+                        "Some extracted values already in ctx. Skipping ! \n Use force to rerun"
+                    );
+                    return None;
+                }
+                Some(value)
+            }
+        }
+    }
+
     ///
     /// Prepare all data for running an action
     /// if chain is given, we need to have the same length for all parameters
@@ -117,10 +203,12 @@ impl RunActionArgs {
 
         Ok(())
     }
-    pub async fn run_action<'a>(&'a mut self, requester: &'a http::Api<'_>) -> anyhow::Result<()> {
+
+    /// Main function for running an action
+    pub async fn run_action<'a>(&'a mut self, http: &'a http::Api<'_>) -> anyhow::Result<Vec<R>> {
         let cloned = self.clone();
         // creating a new context hashmap for storing extracted values
-        let mut ctx: HashMap<String, String> = match requester.db_handler.get_conf().await {
+        let ctx: HashMap<String, String> = match http.db_handler.get_conf().await {
             Ok(ctx) => ctx.get_value(),
             Err(..) => HashMap::new(),
         };
@@ -142,91 +230,66 @@ impl RunActionArgs {
             .zip(self.query_params.as_ref().expect("Intern error").iter())
             .collect::<Vec<_>>();
 
+        let mut action_results: Vec<R> = vec![];
         for ((((action_name, action_body), action_extract_path), path_params), query_params) in
             zipped
         {
-            let mut action = requester.db_handler.get_action(action_name).await?;
+            let mut action = http.db_handler.get_action(action_name).await?;
+            let project = http.db_handler.get_project(&action.project_name).await?;
+            let mut extended_ctx = project.get_conf();
+            extended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
 
-            let computed_body = match action_body.as_str() {
-                // if static body exists, use it otherwise None is used
-                "" => action.static_body.as_ref().map(|s| s.to_string()),
-                "LAST_SUCCESSFUL_BODY" => {
-                    let last_successful_body = action
-                        .body_example
-                        .as_ref()
-                        .expect("No last successful body found!");
-                    Some(last_successful_body.to_string())
-                }
-                _ => {
-                    // transform the body
-                    serde_json::from_str::<HashMap<String, String>>(action_body)
-                        .ok()
-                        .map(|_| action_body.to_string())
-                        .or_else(|| {
-                            let as_map = parse_multiple_conf(&action_body);
-                            Some(serde_json::to_string(&as_map).unwrap())
-                        })
-                }
-            };
+            let computed_body = self.get_computed_body(action_body, &action, &extended_ctx);
+            let computed_extract_path =
+                self.get_computed_extracted_path(action_extract_path, &extended_ctx);
+            let computed_query_params = get_str_as_interpolated_map(query_params, &extended_ctx);
+            let computed_headers = get_str_as_interpolated_map(&action.headers, &extended_ctx)
+                .unwrap_or(HashMap::new());
+            let computed_url = Self::get_computed_url(
+                path_params,
+                &project.test_url.expect("Unknown URL"),
+                &action.url,
+                &extended_ctx,
+            );
 
-            let computed_extract_path = match action_extract_path.as_str() {
-                "" => None,
-                _ => {
-                    let value = action_extract_path
-                        .as_str()
-                        .split(",")
-                        .map(|s| {
-                            let mut split = s.split(":");
-                            (
-                                split.next().unwrap().to_string(),
-                                split.next().map(String::from),
-                            )
-                        })
-                        .collect::<HashMap<_, _>>();
-
-                    let all_values = value
-                        .values()
-                        .filter_map(|v| v.as_ref())
-                        .map(|v| ctx.contains_key(v))
-                        .collect::<Vec<_>>();
-
-                    let needs_to_continue = all_values.iter().all(|v| *v);
-                    if !all_values.is_empty() && needs_to_continue && !self.force {
-                        println!("Continuing !");
-                        debug!("Continuing !");
-                        continue;
-                    }
-                    Some(value)
-                }
-            };
-
-            let computed_path_params = parse_multiple_conf_as_opt(path_params);
-            let computed_query_params = parse_multiple_conf_as_opt(query_params);
-
-            requester
-                .run_action(
-                    &mut action,
-                    &computed_path_params,
+            let result = http
+                .fetch(
+                    action_name,
+                    &computed_url,
+                    &action.verb,
+                    &computed_headers,
                     &computed_query_params,
+                    &computed_body,
+                    self.no_print,
+                )
+                .await;
+
+            let result_handler = HttpResult::new(http.db_handler, &result);
+
+            // handle result
+            result_handler
+                .handle_result(
+                    &mut action,
                     &computed_body,
                     &computed_extract_path,
                     self.no_print,
-                    &mut ctx,
+                    &mut extended_ctx,
                 )
                 .await?;
+
+            action_results.push(R {
+                result,
+                ctx: extended_ctx,
+            });
         }
 
         // save as requested
         if self.save_as.is_some() {
-            requester
-                .db_handler
-                .upsert_flow(
-                    self.save_as.as_ref().unwrap(),
-                    &cloned,
-                )
+            http.db_handler
+                .upsert_flow(self.save_as.as_ref().unwrap(), &cloned)
                 .await?;
         }
 
-        Ok(())
+        Ok(action_results)
     }
 }

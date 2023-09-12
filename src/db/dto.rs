@@ -1,10 +1,10 @@
 use crate::commands::project::add_action::AddActionArgs;
 use crate::commands::project::create::CreateProjectArgs;
+use crate::commands::run::action::RunActionArgs;
 use crate::utils::parse_conf_to_map;
 use colored::Colorize;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use crate::commands::run::action::RunActionArgs;
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct Project {
@@ -69,7 +69,10 @@ impl Action {
     }
 
     pub fn is_form(&self) -> bool {
-        self.headers_as_map().get(reqwest::header::CONTENT_TYPE.as_str()).unwrap_or(&"".to_string()) == "application/x-www-form-urlencoded"
+        self.headers_as_map()
+            .get(reqwest::header::CONTENT_TYPE.as_str())
+            .unwrap_or(&"".to_string())
+            == "application/x-www-form-urlencoded"
     }
 }
 
@@ -149,7 +152,6 @@ impl Display for History {
     }
 }
 
-
 #[derive(sqlx::FromRow)]
 pub struct Flow {
     pub name: String,
@@ -163,7 +165,20 @@ impl Flow {
 }
 
 impl Display for Flow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}, {}", self.name, self.run_action_args)
     }
+}
+
+#[derive(sqlx::FromRow)]
+pub struct TestSuite {
+    pub name: String,
+    pub created_at: Option<chrono::NaiveDateTime>,
+}
+
+#[derive(sqlx::FromRow)]
+pub struct TestSuiteInstance {
+    pub test_suite_name: String,
+    pub flow_name: String,
+    pub expect: String,
 }

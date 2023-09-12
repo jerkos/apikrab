@@ -28,7 +28,7 @@ actions to create a flow.
 - [x] Run an action
 - [x] Extract data from your response using jsonpath
 - [x] Chain actions
-- [ ] Test your action
+- [x] Test your action
 
 ## Build from source
 Install rust
@@ -37,7 +37,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 Clone the repo
 ```bash
-git clone
+git clone url_of_project
 ```
 Build the project
 ```bash
@@ -65,6 +65,17 @@ Add an action to your project
 ```bash
 apicrab project add-action myproject -n get-todo -v GET --url /todos/{id}
 ```
+
+Get information about  your actions
+```bash
+apicrab project info myproject
+```
+Or using the ui
+```bash
+apicrab project ui myproject
+```
+![Project view](img/project_view.png "Project view")
+
 
 Run your action
 ```bash
@@ -116,6 +127,16 @@ Action updated
 Extraction of completed: false 
 ```
 
+List all requests history
+```bash
+apicrab history list
+```
+or using the ui
+```bash
+apicrab history ui
+```
+![History view](img/history.png "History view")
+
 Save your action as flow to avoid repeating yourself. This one is fairly simple.
 ```bash
 apicrab run action get-todo -p id:1 -e completed:COMPLETED --save-flow get-todo
@@ -133,6 +154,7 @@ apicrab test-suite add-flow mytest -n get-todo --expect COMPLETED:false --expect
 
 apicrab run test-suite mytest
 ```
+Gives the following output
 
-
+![tests results](img/tests.png "Test results")
 

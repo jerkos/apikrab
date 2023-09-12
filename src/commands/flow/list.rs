@@ -1,5 +1,5 @@
-use clap::Args;
 use crate::db::db_handler::DBHandler;
+use clap::Args;
 
 #[derive(Args)]
 pub struct FlowListArgs {}

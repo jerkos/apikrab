@@ -8,10 +8,11 @@ mod utils;
 use crate::commands::history::{History, HistoryCommands};
 use clap::{Args, Parser, Subcommand};
 
+use crate::commands::flow::{Flow, FlowCommands};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
-use crate::commands::flow::{Flow, FlowCommands};
-use crate::db::db_handler::{DBHandler};
+use crate::commands::ts::{TestSuite, TestSuiteCommands};
+use crate::db::db_handler::DBHandler;
 use crate::ui::run_ui::UIRunner;
 
 #[derive(Parser)]
@@ -33,9 +34,11 @@ enum Commands {
     /// Flow information
     Flow(Flow),
 
+    /// Test suite information
+    TestSuite(TestSuite),
+
     /// List all history call
     History(History),
-
 }
 
 #[derive(Args)]
@@ -84,10 +87,23 @@ async fn main() -> anyhow::Result<()> {
             RunCommands::Flow(run_flow_args) => {
                 run_flow_args.run_flow(&db_handler, &requester).await?;
             }
+            RunCommands::TestSuite(test_suite_args) => {
+                test_suite_args.run_test_suite(&requester).await?;
+            }
         },
         Commands::Flow(flow) => match &mut flow.flow_commands {
             FlowCommands::List(flow_list_args) => {
                 flow_list_args.list_flows(&db_handler).await?;
+            }
+        },
+        Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {
+            TestSuiteCommands::New(create_test_suite_args) => {
+                create_test_suite_args
+                    .upsert_test_suite(&db_handler)
+                    .await?;
+            }
+            TestSuiteCommands::AddTestSuite(add_test_suite_args) => {
+                add_test_suite_args.add_test_suite(&db_handler).await?;
             }
         },
         Commands::History(history) => match &mut history.history_commands {

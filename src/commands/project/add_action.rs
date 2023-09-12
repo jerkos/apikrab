@@ -1,5 +1,5 @@
-use crate::db::dto::Action;
 use crate::db::db_handler::DBHandler;
+use crate::db::dto::Action;
 use clap::Args;
 
 #[derive(Args)]
@@ -34,8 +34,8 @@ pub struct AddActionArgs {
 
 impl AddActionArgs {
     pub async fn add_action(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
-        let light_action: Action = self.into();
-        db_handler.upsert_action(&light_action).await?;
+        let action: Action = self.into();
+        db_handler.upsert_action(&action).await?;
         Ok(())
     }
 }

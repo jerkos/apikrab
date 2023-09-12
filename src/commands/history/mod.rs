@@ -16,6 +16,5 @@ pub enum HistoryCommands {
     /// Show history
     List(HistoryArgs),
     /// Run history ui
-    Ui
-
+    Ui,
 }

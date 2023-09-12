@@ -1,8 +1,7 @@
-use clap::{Args, Subcommand};
 use crate::commands::flow::list::FlowListArgs;
+use clap::{Args, Subcommand};
 
 mod list;
-
 
 #[derive(Args)]
 pub struct Flow {
@@ -14,5 +13,4 @@ pub struct Flow {
 pub enum FlowCommands {
     /// Run an action
     List(FlowListArgs),
-
 }
