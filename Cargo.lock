@@ -122,7 +122,6 @@ dependencies = [
  "clap",
  "colored",
  "crossterm",
- "either",
  "env_logger",
  "log",
  "rand",
@@ -131,7 +130,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "thiserror",
  "tokio",
 ]
 
