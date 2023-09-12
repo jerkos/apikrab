@@ -26,7 +26,7 @@ actions to create a flow.
 - [x] Create a new project
 - [x] Add an action to your project
 - [x] Run an action
-- [x] Extract data from your response using jsonpath
+- [x] Extract data from your response using jsonpath (not fully implemented yet)
 - [x] Chain actions
 - [x] Test your action
 
@@ -113,9 +113,6 @@ apicrab run flow get-todo-by-name-flow
 
 ```
 
-
-
-
 Extract data from your response using jsonpath (not fully implemented yet)
 ```bash
 apicrab run action get-todo -p id:1 -e completed
@@ -158,3 +155,27 @@ Gives the following output
 
 ![tests results](img/tests.png "Test results")
 
+## Built with
+- clap
+- sqlx
+- reqwest
+- serde
+- serde_json
+- ratatui
+- colored
+- tokio
+
+## Ideas
+
+- [ ] Add a way to save your project in a file
+- [ ] Add a way to load your project from a file
+- [ ] Share your project with others
+- [ ] Improve the ui
+
+
+## Contributing
+
+If you want to contribute to this project, you're welcome. Just open an issue or a pull request.
+
+## License
+MIT
