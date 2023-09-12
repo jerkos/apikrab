@@ -54,8 +54,6 @@ jobs:
           staging="apicrab_${{ matrix.build }}_${{ github.event.release.tag_name }}"
           mkdir -p "$staging"
 
-          cp {README.md} "$staging/"
-
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp target/release/{apicrab.exe} "$staging/"
             7z a "$staging.zip" "$staging"
