@@ -21,7 +21,7 @@ pub fn parse_conf_to_map(conf: &Option<Vec<String>>) -> HashMap<String, String> 
 }
 
 pub fn parse_multiple_conf(conf: &str) -> HashMap<String, String> {
-    if conf.contains(",") && !conf.contains("{") {
+    if !conf.contains("{") {
         return conf
             .split(',')
             .map(|s| {
