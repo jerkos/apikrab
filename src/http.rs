@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use crossterm::style::Stylize;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
@@ -62,6 +63,10 @@ impl<'a> Api<'a> {
         body: &Option<String>,
         no_print: bool,
     ) -> anyhow::Result<FetchResult> {
+
+        if ! no_print {
+            println!("{} to {}", verb.yellow(), url.red());
+        }
         let form = headers
             .get("Content-Type")
             .map(|v| v == &"application/x-www-form-urlencoded");
