@@ -20,6 +20,12 @@ pub struct AddTestSuiteArgs {
 
 impl AddTestSuiteArgs {
     pub async fn add_test_suite(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
+        let test_suite = db_handler.get_test_suite(&self.name).await;
+        if let Err(e) = test_suite {
+            println!("Error getting test suite {}", self.name);
+            return Err(e);
+        }
+
         println!("Adding test suite {} to flow {}", self.name, self.flow_name);
         let vec_as_str = self.expect.join(",");
         let expected =

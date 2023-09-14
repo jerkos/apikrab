@@ -1,4 +1,5 @@
 use crate::commands::run::_http_result::HttpResult;
+use crate::commands::run::_printer::Printer;
 use crate::db::dto::Action;
 use crate::http;
 use crate::http::FetchResult;
@@ -44,6 +45,9 @@ pub struct RunActionArgs {
     #[arg(long)]
     save_as: Option<String>,
 
+    #[arg(long)]
+    clipboard: bool,
+
     /// force action rerun even if its extracted value exists in current context
     #[arg(long)]
     pub force: bool,
@@ -51,6 +55,10 @@ pub struct RunActionArgs {
     /// print the output of the command
     #[arg(long)]
     pub no_print: bool,
+
+    /// grep the output of the command
+    #[arg(long)]
+    pub grep: bool,
 }
 
 impl RunActionArgs {
@@ -97,7 +105,7 @@ impl RunActionArgs {
         let full_url = format!("{}/{}", project_url, action_url);
         path_params_as_map
             .as_ref()
-            .map(|path_params| replace_with_conf(&full_url, &path_params))
+            .map(|path_params| replace_with_conf(&full_url, path_params))
             .map(|full_url| replace_with_conf(&full_url, ctx))
             .unwrap_or_else(|| replace_with_conf(&full_url, ctx))
     }
@@ -160,7 +168,7 @@ impl RunActionArgs {
                     Some(data_vec) => {
                         if !is_chained_cmd {
                             if data_vec.len() > 1 {
-                                let contains_acc = data_vec.iter().any(|s| s.contains("{"));
+                                let contains_acc = data_vec.iter().any(|s| s.contains('{'));
                                 if contains_acc {
                                     anyhow::bail!(
                                         "Chain, body and extract path must have the same length"
@@ -252,6 +260,8 @@ impl RunActionArgs {
                 &extended_ctx,
             );
 
+            let mut printer = Printer::new(self.no_print, self.clipboard, self.grep);
+
             let result = http
                 .fetch(
                     action_name,
@@ -260,11 +270,11 @@ impl RunActionArgs {
                     &computed_headers,
                     &computed_query_params,
                     &computed_body,
-                    self.no_print,
+                    &printer,
                 )
                 .await;
 
-            let result_handler = HttpResult::new(http.db_handler, &result);
+            let mut result_handler = HttpResult::new(http.db_handler, &result, &mut printer);
 
             // handle result
             result_handler
@@ -272,7 +282,6 @@ impl RunActionArgs {
                     &mut action,
                     &computed_body,
                     &computed_extract_path,
-                    self.no_print,
                     &mut extended_ctx,
                 )
                 .await?;

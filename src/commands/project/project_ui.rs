@@ -10,18 +10,13 @@ use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 use std::{io, thread};
 use tokio::runtime::Handle;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 enum ActiveArea {
+    #[default]
     ProjectPane,
     ActionPane,
     BodyExample,
     ResponseExample,
-}
-
-impl Default for ActiveArea {
-    fn default() -> Self {
-        ActiveArea::ProjectPane
-    }
 }
 
 #[derive(Clone)]
@@ -54,7 +49,7 @@ impl ProjectUI {
         let self_cloned = self.clone();
 
         let actions = thread::spawn(move || {
-            let v = handle.block_on(async move {
+            handle.block_on(async move {
                 let selected_item = self_cloned.projects.items
                     [self_cloned.projects.state.selected().unwrap()]
                 .clone();
@@ -63,8 +58,7 @@ impl ProjectUI {
                     .get_actions(&selected_item.name)
                     .await
                     .unwrap()
-            });
-            v
+            })
         })
         .join()
         .unwrap();
@@ -208,11 +202,7 @@ impl ProjectUI {
         let current_action = &self.actions.items[selected_action_index.unwrap()];
         let action_body = serde_json::to_string_pretty(
             &serde_json::from_str::<serde_json::Value>(
-                current_action
-                    .body_example
-                    .as_ref()
-                    .map(String::as_str)
-                    .unwrap_or(&"{}"),
+                current_action.body_example.as_deref().unwrap_or("{}"),
             )
             .unwrap(),
         )
@@ -220,11 +210,7 @@ impl ProjectUI {
 
         let response_example = serde_json::to_string_pretty(
             &serde_json::from_str::<serde_json::Value>(
-                current_action
-                    .response_example
-                    .as_ref()
-                    .map(String::as_str)
-                    .unwrap_or(&"{}"),
+                current_action.response_example.as_deref().unwrap_or("{}"),
             )
             .unwrap(),
         )

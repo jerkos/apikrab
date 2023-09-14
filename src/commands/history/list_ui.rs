@@ -40,7 +40,7 @@ impl HistoryUI {
     fn to_readable_str(&self, datetime: &chrono::NaiveDateTime) -> String {
         let now = chrono::Local::now().naive_local();
         let duration = now - *datetime;
-        return if duration < chrono::Duration::minutes(1) {
+        if duration < chrono::Duration::minutes(1) {
             format!("Just now, {}", datetime.format("%H:%M"))
         } else if duration < chrono::Duration::hours(1) {
             format!(
@@ -61,7 +61,7 @@ impl HistoryUI {
                 if duration.num_days() > 1 { "s" } else { "" },
                 datetime.format("%Y-%m-%d")
             )
-        };
+        }
     }
 
     fn build_ui(&self) -> impl StatefulWidget<State = TableState> {

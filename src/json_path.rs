@@ -7,17 +7,17 @@ pub fn json_path(json_str: &str, search: &str) -> Option<serde_json::Value> {
 
     let json: serde_json::Value = serde_json::from_str(json_str).ok()?;
     search
-        .split(".")
+        .split('.')
         .try_fold(&json, |json, token| {
-            let (corrected_json, corrected_token) = if token.contains("[") {
-                let split = token.split("[").collect::<Vec<&str>>();
+            let (corrected_json, corrected_token) = if token.contains('[') {
+                let split = token.split('[').collect::<Vec<&str>>();
                 let (first_token, index_or_condition_type) = match &split[..] {
                     [first_token, index_or_condition_type] => {
                         (first_token, index_or_condition_type)
                     }
                     _ => panic!("Invalid token"),
                 };
-                let index_or_condition_type = index_or_condition_type.trim_end_matches("]");
+                let index_or_condition_type = index_or_condition_type.trim_end_matches(']');
                 match json {
                     serde_json::Value::Object(map) => {
                         (map.get(*first_token), index_or_condition_type)

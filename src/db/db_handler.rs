@@ -1,8 +1,8 @@
+use crate::commands::run::_printer::Printer;
 use crate::commands::run::action::RunActionArgs;
 use crate::db::dto::{Action, Context, Flow, History, Project, TestSuite, TestSuiteInstance};
 use colored::Colorize;
 use sqlx::{sqlite::SqlitePool, Executor};
-use std::fmt::Display;
 
 static INIT_TABLES: &str = r#"
 BEGIN TRANSACTION;
@@ -77,7 +77,9 @@ impl DBHandler {
     }
 
     fn get_conn(&self) -> &SqlitePool {
-        self.conn.as_ref().expect(CONNECTION_ERROR.as_ref())
+        self.conn
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}", CONNECTION_ERROR))
     }
 
     /// Create database if needed at the startup of the application
@@ -140,14 +142,18 @@ impl DBHandler {
         Ok(r)
     }
 
-    pub async fn get_projects(&self) -> anyhow::Result<(Vec<Project>)> {
+    pub async fn get_projects(&self) -> anyhow::Result<Vec<Project>> {
         let r = sqlx::query_as::<_, Project>("SELECT * FROM projects")
             .fetch_all(self.get_conn())
             .await?;
         Ok(r)
     }
 
-    pub async fn upsert_action(&self, light_action: &Action) -> anyhow::Result<()> {
+    pub async fn upsert_action(
+        &self,
+        light_action: &Action,
+        printer: &Printer,
+    ) -> anyhow::Result<()> {
         let r = sqlx::query(
             r#"
             INSERT INTO actions (name, url, verb, static_body, headers, body_example, response_example, project_name)
@@ -168,10 +174,10 @@ impl DBHandler {
             .await?
             .last_insert_rowid();
 
-        match r {
+        printer.p_info(|| match r {
             0 => println!("{}", "Action updated".blue()),
             _ => println!("{}", "Action successfully added".yellow()),
-        }
+        });
         Ok(())
     }
 
@@ -201,7 +207,7 @@ impl DBHandler {
         .bind(action_name)
         .fetch_one(self.get_conn())
         .await
-        .expect(format!("Action {} not found", action_name).as_str());
+        .unwrap_or_else(|_| panic!("Action {} not found", action_name));
 
         Ok(action)
     }
@@ -316,8 +322,8 @@ impl DBHandler {
         .bind(&history.body)
         .bind(&history.headers)
         .bind(&history.response)
-        .bind(&history.status_code)
-        .bind(&history.duration)
+        .bind(history.status_code)
+        .bind(history.duration)
         .execute(self.get_conn())
         .await?
         .last_insert_rowid();
