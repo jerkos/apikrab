@@ -75,7 +75,7 @@ impl<'a> TestChecker<'a> {
 
         let last_result = self.fetch_results.last().unwrap();
         let result = &last_result.result;
-        if let Err(_) = result {
+        if result.is_err() {
             println!("   {} {}", "🦄".red(), "Error while fetching".red());
             return false;
         }

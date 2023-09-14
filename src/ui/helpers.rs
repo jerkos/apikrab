@@ -1,4 +1,4 @@
-use ratatui::widgets::{ListState, TableState};
+use ratatui::widgets::ListState;
 
 pub trait Selectable {
     fn selected(&self) -> Option<usize>;
@@ -7,11 +7,11 @@ pub trait Selectable {
 
 impl Selectable for ListState {
     fn selected(&self) -> Option<usize> {
-        return self.selected();
+        self.selected()
     }
 
     fn select(&mut self, index: Option<usize>) {
-        return self.select(index);
+        self.select(index)
     }
 }
 
@@ -62,11 +62,11 @@ pub struct StatefulList<T> {
 
 impl<T> Stateful<ListState> for StatefulList<T> {
     fn items_len(&self) -> usize {
-        return self.items.len();
+        self.items.len()
     }
 
     fn state(&mut self) -> &mut ListState {
-        return &mut self.state;
+        &mut self.state
     }
 }
 

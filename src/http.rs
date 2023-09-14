@@ -1,9 +1,10 @@
+use crossterm::style::Stylize;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use crossterm::style::Stylize;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
+use crate::commands::run::_printer::Printer;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::History;
 
@@ -61,15 +62,13 @@ impl<'a> Api<'a> {
         headers: &HashMap<String, String>,
         query_params: &Option<HashMap<String, String>>,
         body: &Option<String>,
-        no_print: bool,
+        printer: &Printer,
     ) -> anyhow::Result<FetchResult> {
+        printer.p_info(|| println!("{} {}", verb.yellow(), url.red()));
 
-        if ! no_print {
-            println!("{} to {}", verb.yellow(), url.red());
-        }
         let form = headers
             .get("Content-Type")
-            .map(|v| v == &"application/x-www-form-urlencoded");
+            .map(|v| v == "application/x-www-form-urlencoded");
 
         // building request
         let mut builder = match verb {
@@ -109,9 +108,7 @@ impl<'a> Api<'a> {
         let start = Instant::now();
         let response = builder.headers(header_map).send().await?;
         let duration = start.elapsed();
-        if !no_print {
-            println!("Request took: {:?}", duration);
-        }
+        printer.p_info(|| println!("Request took: {:?}", duration));
 
         // getting status and response
         let status = response.status();
@@ -119,7 +116,7 @@ impl<'a> Api<'a> {
 
         let fetch_result = FetchResult {
             response: text,
-            status: status.as_u16().into(),
+            status: status.as_u16(),
             duration,
         };
         // insert history line

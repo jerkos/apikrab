@@ -14,9 +14,7 @@ impl ProjectInfoArgs {
         println!("{}\n", project.name.blue().bold());
 
         let actions = db_handler.get_actions(&self.name).await?;
-        actions
-            .iter()
-            .for_each(|action| println!("   {}", action.to_string()));
+        actions.iter().for_each(|action| println!("   {}", action));
         Ok(())
     }
 }

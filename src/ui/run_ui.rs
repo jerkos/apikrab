@@ -45,9 +45,8 @@ pub trait UIRunner {
     fn handle_event(&mut self) -> io::Result<bool> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(true),
-                    _ => {}
+                if let KeyCode::Char('q') = key.code {
+                    return Ok(true);
                 }
             }
         }
