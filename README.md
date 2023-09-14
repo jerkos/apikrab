@@ -35,16 +35,17 @@ Some commands have an ui mode (history, project info). See the help for more inf
 - [x] Chain actions
 - [x] Test your action
 
-## Build from source
+## Installation
+### Build from source
 Install rust
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 Clone the repo
 ```bash
-git clone url_of_project
+git clone git@github.com:jerkos/apicrab.git
 ```
-Build the project
+Build the project in release mode
 ```bash
 cargo build --release
 ```
@@ -53,11 +54,16 @@ Add the binary to your path
 export PATH=$PATH:/path/to/apicrab/target/release
 ```
 
+### Download the binary
+
+Grab the latest release from the [release page](https://github.com/jerkos/apicrab/releases)
+for your platform (linux or darwin for the moment), and put in your path.
+
 ## Usage
 ```bash
 apicrab --help
 ```
-Works also for subcommand:
+Works also for all subcommands:
 ```bash
 apicrab project --help
 ```
@@ -81,14 +87,17 @@ Get information about  your actions
 ```bash
 apicrab project info myproject
 ```
-Or using the ui
+Or using the ui to see all projects at once
 ```bash
-apicrab project ui myproject
+apicrab project ui
 ```
 ![Project view](img/project_view.png "Project view")
 
 
-Run your action
+Run your action:
+- with path parameters, syntax is `-p name:value`
+- with query parameters, syntax is `-q name:value`
+- with body, syntax is `-b name:value` or `-b '{"name": "value"}'`
 ```bash
 apicrab run action get-todo -p id:1
 ```
@@ -179,7 +188,7 @@ Gives the following output
 ## Ideas
 
 - [ ] Add a way to save your project in a file
-- [ ] Add a way to load your project from a file
+- [ ] Add a way to load your project from a file (postman collection ?)
 - [ ] Share your project with others
 - [ ] Extend expectation mechanisms (regex, jsonpath, include, ...)
 - [ ] Improve the ui
