@@ -4,12 +4,15 @@ use crate::db::dto::Action;
 use crate::http;
 use crate::http::FetchResult;
 use crate::utils::{
-    get_str_as_interpolated_map, parse_multiple_conf, parse_multiple_conf_as_opt,
-    parse_multiple_conf_with_opt, replace_with_conf,
+    get_str_as_interpolated_map, parse_multiple_conf,
+    parse_multiple_conf_as_opt_with_grouping_and_interpolation, parse_multiple_conf_with_opt,
+    replace_with_conf,
 };
 use clap::Args;
+use futures::future;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct R {
     pub result: anyhow::Result<FetchResult>,
@@ -62,7 +65,10 @@ pub struct RunActionArgs {
 }
 
 impl RunActionArgs {
-    pub fn get_computed_body(
+    /// Body interpolation
+    /// Some magical values exists e.g.
+    /// LAST_SUCCESSFUL_BODY
+    pub fn get_body(
         &self,
         body: &str,
         action: &Action,
@@ -95,22 +101,36 @@ impl RunActionArgs {
             .or(Some(body.to_owned()))
     }
 
-    pub fn get_computed_url(
+    /// Compute several url given path params
+    /// using the cartesian product of all values
+    /// te generate all possible urls
+    pub fn get_computed_urls(
         path_params: &str,
         project_url: &str,
         action_url: &str,
         ctx: &HashMap<String, String>,
-    ) -> String {
-        let path_params_as_map = parse_multiple_conf_as_opt(path_params);
+    ) -> HashSet<String> {
+        let all_path_params =
+            parse_multiple_conf_as_opt_with_grouping_and_interpolation(path_params, ctx);
         let full_url = format!("{}/{}", project_url, action_url);
-        path_params_as_map
-            .as_ref()
-            .map(|path_params| replace_with_conf(&full_url, path_params))
-            .map(|full_url| replace_with_conf(&full_url, ctx))
-            .unwrap_or_else(|| replace_with_conf(&full_url, ctx))
+
+        all_path_params
+            .iter()
+            .map(|params| {
+                let mut url = full_url.clone();
+                if let Some(params) = params {
+                    for (k, v) in params.iter() {
+                        url = url.replace(format!("{{{}}}", k).as_str(), v);
+                    }
+                }
+                url
+            })
+            .collect()
     }
 
-    pub fn get_computed_extracted_path(
+    /// Extract path interpolation
+    /// Special cases that the name may or may not be present
+    pub fn get_xtracted_path(
         &self,
         extracted_path: &str,
         ctx: &HashMap<String, String>,
@@ -238,58 +258,87 @@ impl RunActionArgs {
             .zip(self.query_params.as_ref().expect("Intern error").iter())
             .collect::<Vec<_>>();
 
+        // create a vector of results
         let mut action_results: Vec<R> = vec![];
-        for ((((action_name, action_body), action_extract_path), path_params), query_params) in
-            zipped
-        {
-            let mut action = http.db_handler.get_action(action_name).await?;
-            let project = http.db_handler.get_project(&action.project_name).await?;
-            let mut extended_ctx = project.get_conf();
-            extended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
 
-            let computed_body = self.get_computed_body(action_body, &action, &extended_ctx);
-            let computed_extract_path =
-                self.get_computed_extracted_path(action_extract_path, &extended_ctx);
-            let computed_query_params = get_str_as_interpolated_map(query_params, &extended_ctx);
-            let computed_headers = get_str_as_interpolated_map(&action.headers, &extended_ctx)
-                .unwrap_or(HashMap::new());
-            let computed_url = Self::get_computed_url(
-                path_params,
-                &project.test_url.expect("Unknown URL"),
-                &action.url,
-                &extended_ctx,
+        for ((((action_name, action_body), xtract_path), path_params), query_params) in zipped {
+            // retrieve some information in the database
+            let action = http.db_handler.get_action(action_name).await?;
+            let project = http.db_handler.get_project(&action.project_name).await?;
+            let mut xtended_ctx = project.get_conf();
+
+            // update the configuration
+            xtended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
+
+            // retrieve test url
+            let test_url = project.test_url.as_ref().expect("Unknown URL").clone();
+
+            let computed_urls =
+                Self::get_computed_urls(path_params, test_url.as_str(), &action.url, &xtended_ctx);
+
+            println!("{:?}", computed_urls);
+
+            let computed_query_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(
+                query_params,
+                &xtended_ctx,
             );
 
-            let mut printer = Printer::new(self.no_print, self.clipboard, self.grep);
+            // run in concurrent mode
+            let bodies = future::join_all(
+                computed_urls
+                    .iter()
+                    .cartesian_product(computed_query_params)
+                    .map(|(computed_url, query_params)| {
+                        let body = self.get_body(action_body, &action, &xtended_ctx);
+                        let xtracted_path = self.get_xtracted_path(xtract_path, &xtended_ctx);
 
-            let result = http
-                .fetch(
-                    action_name,
-                    &computed_url,
-                    &action.verb,
-                    &computed_headers,
-                    &computed_query_params,
-                    &computed_body,
-                    &printer,
-                )
-                .await;
+                        let computed_headers =
+                            get_str_as_interpolated_map(&action.headers, &xtended_ctx)
+                                .unwrap_or(HashMap::new());
 
-            let mut result_handler = HttpResult::new(http.db_handler, &result, &mut printer);
+                        let mut extended_ctx = xtended_ctx.clone();
+                        let mut printer = Printer::new(self.no_print, self.clipboard, self.grep);
+                        let mut action = action.clone();
 
-            // handle result
-            result_handler
-                .handle_result(
-                    &mut action,
-                    &computed_body,
-                    &computed_extract_path,
-                    &mut extended_ctx,
-                )
-                .await?;
+                        // run in concurrent mode
+                        async move {
+                            let result = http
+                                .fetch(
+                                    action_name,
+                                    computed_url,
+                                    &action.verb,
+                                    &computed_headers,
+                                    &query_params,
+                                    &body,
+                                    &printer,
+                                )
+                                .await;
 
-            action_results.push(R {
-                result,
-                ctx: extended_ctx,
-            });
+                            let mut result_handler =
+                                HttpResult::new(http.db_handler, &result, &mut printer);
+
+                            // handle result
+                            let _ = result_handler
+                                .handle_result(
+                                    &mut action,
+                                    &body,
+                                    &xtracted_path,
+                                    &mut extended_ctx,
+                                )
+                                .await;
+
+                            R {
+                                result,
+                                ctx: extended_ctx,
+                            }
+                        }
+                    }),
+            )
+            .await;
+
+            for body in bodies {
+                action_results.push(body);
+            }
         }
 
         // save as requested

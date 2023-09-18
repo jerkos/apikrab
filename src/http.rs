@@ -64,7 +64,22 @@ impl<'a> Api<'a> {
         body: &Option<String>,
         printer: &Printer,
     ) -> anyhow::Result<FetchResult> {
-        printer.p_info(|| println!("{} {}", verb.yellow(), url.red()));
+        printer.p_info(|| {
+            println!(
+                "{} {}?{}",
+                verb.yellow(),
+                url.red(),
+                query_params
+                    .as_ref()
+                    .map(|v| v
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<String>>()
+                        .join("&"))
+                    .unwrap_or("".to_string())
+                    .green()
+            )
+        });
 
         let form = headers
             .get("Content-Type")
