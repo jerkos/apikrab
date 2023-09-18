@@ -130,7 +130,16 @@ apicrab run action authent -q '' -e access_token:ACCESS_TOKEN\n
 --chain search_by_name -q 'name:Buy tomatoes' -e $ --save-as get-todo-by-name-flow
 
 apicrab run flow get-todo-by-name-flow
+```
 
+Run action concurrently specifying several path params / query params:
+```bash
+apicrab run action get-todo -p id:1 -p id:2 -p id:3
+# or shortier
+apicrab run action get-todo -p 'id:1|2|3'
+# or with query params
+apicrab run action get-todo -p 'id:1|2|3' -q 'completed:true|false'
+# 🔥 launch the cartesian product of all params !
 ```
 
 Extract data from your response using jsonpath (not fully implemented yet)
@@ -177,6 +186,7 @@ Gives the following output
 
 ## Built with
 - clap
+- itertools
 - sqlx
 - reqwest
 - serde
