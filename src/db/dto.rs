@@ -1,7 +1,7 @@
 use crate::commands::project::add_action::AddActionArgs;
 use crate::commands::project::create::CreateProjectArgs;
 use crate::commands::run::action::RunActionArgs;
-use crate::utils::parse_conf_to_map;
+use crate::utils::parse_cli_conf_to_map;
 use colored::Colorize;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -40,7 +40,7 @@ impl Display for Project {
 
 impl From<&CreateProjectArgs> for Project {
     fn from(args: &CreateProjectArgs) -> Self {
-        let conf = parse_conf_to_map(&args.conf);
+        let conf = parse_cli_conf_to_map(&args.conf);
         let conf_as_str = serde_json::to_string(&conf).expect("Error serializing conf");
         Project {
             name: args.name.clone(),
@@ -78,7 +78,7 @@ impl Action {
 
 impl From<&AddActionArgs> for Action {
     fn from(value: &AddActionArgs) -> Self {
-        let mut headers = parse_conf_to_map(&value.header);
+        let mut headers = parse_cli_conf_to_map(&value.header);
         if value.form {
             headers.insert(
                 "Content-Type".to_string(),
