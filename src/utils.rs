@@ -140,3 +140,17 @@ pub fn random_emoji() -> char {
     let x: u32 = thread_rng().gen_range(0x1F600..0x1F64F);
     char::from_u32(x).unwrap_or('💔')
 }
+
+pub fn get_full_url(url: &str, query_params: &Option<HashMap<String, String>>) -> String {
+    match query_params {
+        Some(query_params) => {
+            let query_params_as_str = query_params
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<String>>()
+                .join("&");
+            format!("{}?{}", url, query_params_as_str)
+        }
+        None => url.to_string(),
+    }
+}

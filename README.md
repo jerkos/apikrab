@@ -104,7 +104,6 @@ apicrab run action get-todo -p id:1
 ```
 Request took: 265.607263ms
 Status code: 200
-Action updated
 Received response: 
 {
   "completed": false,
@@ -149,7 +148,6 @@ apicrab run action get-todo -p id:1 -e completed
 ```
 Request took: 286.501417ms
 Status code: 200
-Action updated
 Extraction of completed: false 
 ```
 

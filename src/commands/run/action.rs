@@ -4,17 +4,19 @@ use crate::db::dto::Action;
 use crate::http;
 use crate::http::FetchResult;
 use crate::utils::{
-    get_str_as_interpolated_map, parse_multiple_conf,
+    get_full_url, get_str_as_interpolated_map, parse_multiple_conf,
     parse_multiple_conf_as_opt_with_grouping_and_interpolation, parse_multiple_conf_with_opt,
     replace_with_conf,
 };
 use clap::Args;
+use crossterm::style::Stylize;
 use futures::future;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 pub struct R {
+    pub url: String,
     pub result: anyhow::Result<FetchResult>,
     pub ctx: HashMap<String, String>,
 }
@@ -276,15 +278,13 @@ impl RunActionArgs {
             let computed_urls =
                 Self::get_computed_urls(path_params, test_url.as_str(), &action.url, &xtended_ctx);
 
-            println!("{:?}", computed_urls);
-
             let computed_query_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(
                 query_params,
                 &xtended_ctx,
             );
 
             // run in concurrent mode
-            let bodies = future::join_all(
+            let fetch_results = future::join_all(
                 computed_urls
                     .iter()
                     .cartesian_product(computed_query_params)
@@ -297,9 +297,9 @@ impl RunActionArgs {
                                 .unwrap_or(HashMap::new());
 
                         let mut extended_ctx = xtended_ctx.clone();
-                        let mut printer = Printer::new(self.no_print, self.clipboard, self.grep);
                         let mut action = action.clone();
 
+                        let mut printer = Printer::new(self.no_print, self.clipboard, self.grep);
                         // run in concurrent mode
                         async move {
                             let result = http
@@ -328,6 +328,7 @@ impl RunActionArgs {
                                 .await;
 
                             R {
+                                url: get_full_url(computed_url, &query_params),
                                 result,
                                 ctx: extended_ctx,
                             }
@@ -336,7 +337,7 @@ impl RunActionArgs {
             )
             .await;
 
-            for body in bodies {
+            for body in fetch_results {
                 action_results.push(body);
             }
         }
@@ -346,6 +347,31 @@ impl RunActionArgs {
             http.db_handler
                 .upsert_flow(self.save_as.as_ref().unwrap(), &cloned)
                 .await?;
+        }
+
+        if action_results.len() > 1 {
+            // create printer
+            let main_printer = Printer::new(self.no_print, self.clipboard, self.grep);
+            // print results
+            main_printer.p_info(|| {
+                println!("\n\n{}\n", "RESULTS SUMMARY:".bold());
+                action_results
+                    .iter()
+                    .group_by(|r| r.result.as_ref().map(|obj| obj.status).unwrap_or(500))
+                    .into_iter()
+                    .for_each(|(k, v)| {
+                        //let results = v.collect::<Vec<&R>>();
+                        let format = format!("Requests with status {}", k);
+                        if (200..300).contains(&k) {
+                            println!("{}", format.bold().green());
+                        } else if (300..400).contains(&k) {
+                            println!("{}", format.bold().cyan());
+                        } else {
+                            println!("{}", format.bold().red());
+                        }
+                        v.for_each(|r| println!("\t{}", r.url));
+                    })
+            });
         }
 
         Ok(action_results)
