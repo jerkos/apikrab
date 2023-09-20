@@ -1,4 +1,4 @@
-use crate::commands::run::_printer::Printer;
+
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::Action;
 use clap::Args;
@@ -37,9 +37,7 @@ impl AddActionArgs {
     pub async fn add_action(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
         let action: Action = self.into();
 
-        db_handler
-            .upsert_action(&action, &Printer::default())
-            .await?;
+        db_handler.upsert_action(&action, false).await?;
         Ok(())
     }
 }

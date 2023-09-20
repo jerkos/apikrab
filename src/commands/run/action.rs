@@ -345,7 +345,7 @@ impl RunActionArgs {
         // save as requested
         if self.save_as.is_some() {
             http.db_handler
-                .upsert_flow(self.save_as.as_ref().unwrap(), &cloned)
+                .upsert_flow(self.save_as.as_ref().unwrap(), &cloned, self.no_print)
                 .await?;
         }
 

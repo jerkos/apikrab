@@ -14,7 +14,16 @@ pub fn parse_cli_conf_to_map(conf: &Option<Vec<String>>) -> HashMap<String, Stri
         Some(conf) => conf
             .iter()
             .map(|s| s.split(':').collect::<Vec<_>>())
-            .map(|v| (v[0].to_string(), v[1].to_string()))
+            .map(|v| {
+                (
+                    v[0].to_string(),
+                    v[1..v.len()]
+                        .iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<String>>()
+                        .join(":"),
+                )
+            })
             .collect(),
 
         None => HashMap::new(),

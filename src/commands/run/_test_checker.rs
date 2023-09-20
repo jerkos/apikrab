@@ -1,7 +1,10 @@
 use crate::commands::run::action::R;
 use crate::http::FetchResult;
+use assert_json_diff::{assert_json_eq, assert_json_include};
 use crossterm::style::Stylize;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::panic::catch_unwind;
 
 pub struct TestChecker<'a> {
     pub fetch_results: &'a Vec<R>,
@@ -41,13 +44,34 @@ impl<'a> TestChecker<'a> {
                     true
                 }
                 _ => {
-                    let empty_str = "".to_string();
-                    let ctx_value = ctx.get(key).unwrap_or(&empty_str);
-                    if ctx_value != value {
-                        self.print_err(ctx_value, value);
-                        return false;
+                    if value.contains('(') {
+                        let mut splitted = value.split('(');
+                        let func = splitted.next().unwrap();
+                        let args = splitted.next().unwrap().replace(')', "");
+                        let response_value = serde_json::from_str::<Value>(&result.response)
+                            .expect("Error parsing response as json");
+                        let args_value = serde_json::from_str::<Value>(&args)
+                            .expect("Error parsing args as json");
+                        let r = match func {
+                            "JSON_INCLUDE" => catch_unwind(|| {
+                                assert_json_include!(actual: response_value, expected: args_value);
+                            }),
+                            "JSON_EQ" => catch_unwind(|| {
+                                assert_json_eq!(response_value, args_value);
+                            }),
+                            _ => panic!("Unsupported function: {}", func),
+                        };
+                        r.is_ok()
+                    } else {
+                        let empty_str = "".to_string();
+                        let ctx_value = ctx.get(key).unwrap_or(&empty_str);
+                        if ctx_value != value {
+                            self.print_err(ctx_value, value);
+                            false
+                        } else {
+                            true
+                        }
                     }
-                    true
                 }
             })
             .collect::<Vec<bool>>();

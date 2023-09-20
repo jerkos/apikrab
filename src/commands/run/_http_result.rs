@@ -116,7 +116,7 @@ impl<'a> HttpResult<'a> {
 
                 action.response_example = Some(response.clone());
                 action.body_example = body.clone();
-                self.db_handler.upsert_action(action, self.printer).await?;
+                self.db_handler.upsert_action(action, true).await?;
 
                 match extract_pattern {
                     Some(pattern) => {

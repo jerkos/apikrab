@@ -1,4 +1,3 @@
-use crate::commands::run::_printer::Printer;
 use crate::commands::run::action::RunActionArgs;
 use crate::db::dto::{Action, Context, Flow, History, Project, TestSuite, TestSuiteInstance};
 use colored::Colorize;
@@ -149,11 +148,7 @@ impl DBHandler {
         Ok(r)
     }
 
-    pub async fn upsert_action(
-        &self,
-        light_action: &Action,
-        printer: &Printer,
-    ) -> anyhow::Result<()> {
+    pub async fn upsert_action(&self, light_action: &Action, no_print: bool) -> anyhow::Result<()> {
         let r = sqlx::query(
             r#"
             INSERT INTO actions (name, url, verb, static_body, headers, body_example, response_example, project_name)
@@ -174,10 +169,12 @@ impl DBHandler {
             .await?
             .last_insert_rowid();
 
-        printer.p_info(|| match r {
-            0 => println!("{}", "Action updated".blue()),
-            _ => println!("{}", "Action successfully added".yellow()),
-        });
+        if !no_print {
+            match r {
+                0 => println!("{}", "Action updated".blue()),
+                _ => println!("{}", "Action successfully added".yellow()),
+            };
+        }
         Ok(())
     }
 
@@ -259,6 +256,7 @@ impl DBHandler {
         &self,
         flow_name: &str,
         run_action_args: &RunActionArgs,
+        no_print: bool,
     ) -> anyhow::Result<()> {
         let r = sqlx::query(
             r#"
@@ -274,9 +272,11 @@ impl DBHandler {
         .await?
         .last_insert_rowid();
 
-        match r {
-            0 => println!("{}", "Flow updated".blue()),
-            _ => println!("{}", "Flow successfully added".yellow()),
+        if !no_print {
+            match r {
+                0 => println!("{}", "Flow updated".blue()),
+                _ => println!("{}", "Flow successfully added".yellow()),
+            }
         }
         Ok(())
     }
