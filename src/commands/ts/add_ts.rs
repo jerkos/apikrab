@@ -1,6 +1,6 @@
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::TestSuiteInstance;
-use crate::utils::parse_multiple_conf;
+use crate::utils::{parse_cli_conf_to_map, parse_multiple_conf};
 use clap::Args;
 use std::collections::HashMap;
 
@@ -27,10 +27,14 @@ impl AddTestSuiteArgs {
         }
 
         println!("Adding test suite {} to flow {}", self.name, self.flow_name);
-        let vec_as_str = self.expect.join(",");
-        let expected =
-            serde_json::to_string::<HashMap<String, String>>(&parse_multiple_conf(&vec_as_str))
-                .expect("Error serializing conf");
+
+        let expected_clone = Some(self.expect.clone());
+
+        let expected = serde_json::to_string::<HashMap<String, String>>(&parse_cli_conf_to_map(
+            &expected_clone,
+        ))
+        .expect("Error serializing conf");
+
         let test_suite_instance = TestSuiteInstance {
             test_suite_name: self.name.clone(),
             flow_name: self.flow_name.clone(),

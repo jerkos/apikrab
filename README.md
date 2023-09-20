@@ -178,6 +178,19 @@ apicrab test-suite add-flow mytest -n get-todo --expect COMPLETED:false --expect
 
 apicrab run test-suite mytest
 ```
+Some expectations are predefined:
+- STATUS_CODE
+- JSON_INCLUDE
+  - ```bash
+    # means we want extract all json response and save it as DATA variable
+    apicrab run action get-todo -p id:1 -e '$:DATA' --save-flow get-todo-2
+    
+    # then we can use it in our test suite, expecting DATA to include {"id": 1}
+    apicrab test-suite add-flow mytest -n get-todo-2 --expect 'DATA:JSON_INCLUDE({"id": 1})'
+    ```
+- JSON_EQ
+
+
 Gives the following output
 
 ![tests results](img/tests.png "Test results")
