@@ -1,4 +1,3 @@
-
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::Action;
 use clap::Args;

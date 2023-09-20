@@ -51,7 +51,7 @@ impl From<&CreateProjectArgs> for Project {
     }
 }
 
-#[derive(sqlx::FromRow, Debug, Clone)]
+#[derive(sqlx::FromRow, Debug, Clone, Default)]
 pub struct Action {
     pub name: String,
     pub url: String,

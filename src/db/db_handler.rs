@@ -148,7 +148,7 @@ impl DBHandler {
         Ok(r)
     }
 
-    pub async fn upsert_action(&self, light_action: &Action, no_print: bool) -> anyhow::Result<()> {
+    pub async fn upsert_action(&self, action: &Action, no_print: bool) -> anyhow::Result<()> {
         let r = sqlx::query(
             r#"
             INSERT INTO actions (name, url, verb, static_body, headers, body_example, response_example, project_name)
@@ -157,14 +157,14 @@ impl DBHandler {
             DO UPDATE SET url = ?2, verb = ?3, static_body = ?4, headers = ?5, body_example = ?6, response_example = ?7;
             "#,
         )
-            .bind(&light_action.name)
-            .bind(&light_action.url)
-            .bind(&light_action.verb)
-            .bind(&light_action.static_body)
-            .bind(&light_action.headers)
-            .bind(&light_action.body_example)
-            .bind(&light_action.response_example)
-            .bind(&light_action.project_name)
+            .bind(&action.name)
+            .bind(&action.url)
+            .bind(&action.verb)
+            .bind(&action.static_body)
+            .bind(&action.headers)
+            .bind(&action.body_example)
+            .bind(&action.response_example)
+            .bind(&action.project_name)
             .execute(self.get_conn())
             .await?
             .last_insert_rowid();
