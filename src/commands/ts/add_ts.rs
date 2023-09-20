@@ -1,6 +1,6 @@
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::TestSuiteInstance;
-use crate::utils::{parse_cli_conf_to_map, parse_multiple_conf};
+use crate::utils::{parse_cli_conf_to_map};
 use clap::Args;
 use std::collections::HashMap;
 

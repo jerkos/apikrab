@@ -47,7 +47,7 @@ impl<'a> TestChecker<'a> {
                     if value.contains('(') {
                         let mut splitted = value.split('(');
                         let func = splitted.next().unwrap();
-                        let args = splitted.next().unwrap().replace(")", "");
+                        let args = splitted.next().unwrap().replace(')', "");
                         let response_value = serde_json::from_str::<Value>(&result.response)
                             .expect("Error parsing response as json");
                         let args_value = serde_json::from_str::<Value>(&args)
@@ -61,7 +61,7 @@ impl<'a> TestChecker<'a> {
                             }),
                             _ => panic!("Unsupported function: {}", func),
                         };
-                        !r.is_err()
+                        r.is_ok()
                     } else {
                         let empty_str = "".to_string();
                         let ctx_value = ctx.get(key).unwrap_or(&empty_str);
