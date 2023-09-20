@@ -1,8 +1,8 @@
 # 😁🦀 apicrab
 CLI tools to manage your json api call in the terminal for fun only !
 
-> [!WARNING]
-> Tested on MacOs only
+
+![apicrab](img/apicrab.png "apicrab")
 
 ## Philosophy
 
@@ -35,6 +35,9 @@ Some commands have an ui mode (history, project info). See the help for more inf
 - [x] Chain actions
 - [x] Test your action
 
+> [!WARNING]
+> Tested on MacOs only
+
 ## Installation
 ### Build from source
 Install rust
@@ -63,27 +66,45 @@ for your platform (linux or darwin for the moment), and put in your path.
 ```bash
 apicrab --help
 ```
-Works also for all subcommands:
+Works also for all subcommands, e.g.
 ```bash
 apicrab project --help
 ```
 ![Help view](img/help.png "Help view")
 
 
-## Example
+## Create a new project
 
-Create a new project
+specifying for example the test url for your project
 ```bash
 apicrab project new myproject --test-url https://jsonplaceholder.typicode.com
 
 ```
+You can now add an action to your project
 
-Add an action to your project
+## Add an action to your project
+
+You need to specify the name of your project, the name of your action, 
+the http verb, and the sub-url
 ```bash
 apicrab project add-action myproject -n get-todo -v GET --url /todos/{id}
 ```
+Basic support for loading openapi spec file (v3 only) to populate your project
+and actions
+```bash
+# if no servers are defined in your openapi spec, you can specify 
+# one using --test-url or --prod-url
+apicrab project new myproject --from-openapi openapi.json
+```
 
-Get information about  your actions
+## Getting information about projects
+
+### List all projects
+```bash
+apicrab project list
+```
+
+### Get information about  your actions
 ```bash
 apicrab project info myproject
 ```
@@ -94,7 +115,7 @@ apicrab project ui
 ![Project view](img/project_view.png "Project view")
 
 
-Run your action:
+## Run your action:
 - with path parameters, syntax is `-p name:value`
 - with query parameters, syntax is `-q name:value`
 - with body, syntax is `-b name:value` or `-b '{"name": "value"}'`
@@ -114,7 +135,7 @@ Received response:
 ...
 ```
 
-Chain action
+### Chain actions
 ```
 # project as been created with configuration parameters CLIENT_ID and CLIENT_SECRET
 apicrab project add-action myproject -n authent\n
@@ -131,7 +152,7 @@ apicrab run action authent -q '' -e access_token:ACCESS_TOKEN\n
 apicrab run flow get-todo-by-name-flow
 ```
 
-Run action concurrently specifying several path params / query params:
+### Run action concurrently specifying several path params / query params:
 ```bash
 apicrab run action get-todo -p id:1 -p id:2 -p id:3
 # or shortier
@@ -141,6 +162,7 @@ apicrab run action get-todo -p 'id:1|2|3' -q 'completed:true|false'
 # 🔥 launch the cartesian product of all params !
 ```
 
+## Results handling
 Extract data from your response using jsonpath (not fully implemented yet)
 ```bash
 apicrab run action get-todo -p id:1 -e completed
@@ -150,8 +172,20 @@ Request took: 286.501417ms
 Status code: 200
 Extraction of completed: false 
 ```
+You can also save the result in your clipboard
+```bash
+apicrab run action get-todo -p id:1 -e completed --clipboard
+```
+or ready to be used for grepping
+```bash
+apicrab run action get-todo -p id:1 -e completed --grep
+```
+You can use the grep option to filter out unwanted data
+```bash
+apicrab run action get-todo -p id:1 -e $ --grep >> result.json
+```
 
-List all requests history
+## List all requests history
 ```bash
 apicrab history list
 ```
@@ -161,7 +195,9 @@ apicrab history ui
 ```
 ![History view](img/history.png "History view")
 
-Save your action as flow to avoid repeating yourself. This one is fairly simple.
+## Save your action as flow to avoid repeating yourself. 
+
+This one is fairly simple.
 ```bash
 apicrab run action get-todo -p id:1 -e completed:COMPLETED --save-flow get-todo
 ```
@@ -172,6 +208,9 @@ apicrab run flow get-todo
 ```
 
 Flow are especially useful to test your api. You can add expectations to your flow.
+
+## Test your api
+
 ```bash
 apicrab test-suite new mytest
 apicrab test-suite add-flow mytest -n get-todo --expect COMPLETED:false --expect STATUS_CODE:200
@@ -208,7 +247,6 @@ Gives the following output
 
 ## Ideas
 
-- [ ] Add a way to save your project in a file
 - [ ] Add a way to load your project from a file (postman collection ?)
 - [ ] Share your project with others
 - [ ] Extend expectation mechanisms (regex, jsonpath, include, ...)
