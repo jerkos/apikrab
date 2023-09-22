@@ -6,16 +6,21 @@ CLI tools to manage your json api call in the terminal for fun only !
 
 ## Philosophy
 
+# TL;DR
+**You can create a project, add actions to it, run them, chain them, save them as flows, and
+test them.**
+
 The goal of this project is to provide a simple tool to manage your json api call in the
 terminal. It is still in very early stage of development and is not intended to be used in
 production.
 
-First notion is the **project**. A project has a name and root urls for an api to test, and
+
+The first concept is the **project**. A project has a name and root urls for an api to test, and
 optionally a set of **configuration variables**. You can then attach **actions** to your
 project.
 
 An **action** represents a specific endpoint of your api. It has a name, a method (http verb), 
-an url.
+an url, and optionally a body (in case of static body). You can also specify a set of **headers**.
 
 You can run an action with a set of **parameters** such body, path parameters, and query 
 parameters.
@@ -233,6 +238,28 @@ Some expectations are predefined:
 Gives the following output
 
 ![tests results](img/tests.png "Test results")
+
+
+## Shell autocomplete
+It is always more convenient to have autocomplete for your commands. Fortunately, clap
+provides a way to generate a completion script for your shell.
+    
+```bash
+apicrab completion bash > /usr/local/etc/bash_completion.d/apicrab
+```
+Clap also provides completion for zsh, fish, powershell, elvish, and ion. 
+See the clap crate !
+
+Generated script can autocomplete identifiers used for projects, actions, flows, and test suites.
+
+
+### Caveats
+When you add a new action to your project for example, to see it appearing in autocomplete, 
+you have to run again `apicrab completion bash > /usr/local/etc/bash_completion.d/apicrab` 
+and `source ~/.bashrc`.
+
+**For oh-my-zsh, this is done automatically.**
+
 
 ## Built with
 - clap

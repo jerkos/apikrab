@@ -30,6 +30,7 @@ impl CreateProjectArgs {
         &'a self,
         db_handler: &'a DBHandler,
     ) -> Option<(impl Import + 'a, &'a str)> {
+        #[allow(clippy::manual_map)]
         match &self.from_openapi {
             Some(path) => Some((
                 commands::import::openapi::OpenapiV3Importer { db_handler },

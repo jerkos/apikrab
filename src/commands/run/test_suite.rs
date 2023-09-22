@@ -1,16 +1,18 @@
 use crate::commands::run::_test_checker::TestChecker;
 use crate::db::dto::TestSuiteInstance;
 use crate::http::Api;
+use crate::TEST_SUITE;
+use clap::builder::PossibleValuesParser;
 use clap::Args;
 use colored::Colorize;
 use std::collections::HashMap;
-
 #[derive(Args, Debug, Clone)]
 pub struct TestSuiteArgs {
     /// Test suite name
+    #[arg(value_parser = PossibleValuesParser::new(TEST_SUITE.as_slice()))]
     name: String,
 
-    /// debug output
+    /// Debug output
     #[arg(short, long)]
     debug: bool,
 }

@@ -29,7 +29,7 @@ pub enum ProjectCommands {
     RmAction(RmActionArgs),
     /// Get information about a project
     Info(ProjectInfoArgs),
-    /// list projects
+    /// List projects
     List(ListProjects),
     /// Run project ui
     Ui,

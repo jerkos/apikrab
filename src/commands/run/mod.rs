@@ -19,8 +19,8 @@ pub struct Run {
 pub enum RunCommands {
     /// Run an action
     Action(RunActionArgs),
-
+    /// Run a saved flow
     Flow(flow::RunFlowArgs),
-
+    /// Run a saved test suite
     TestSuite(test_suite::TestSuiteArgs),
 }
