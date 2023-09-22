@@ -1,12 +1,14 @@
 use crate::commands::run::action::R;
 use crate::db::db_handler::DBHandler;
 use crate::http::Api;
+use crate::FLOWS;
+use clap::builder::PossibleValuesParser;
 use clap::Args;
 use crossterm::style::Stylize;
-
 #[derive(Args, Debug, Clone)]
 pub struct RunFlowArgs {
-    // action name
+    /// Flow name to be ran
+    #[arg(value_parser = PossibleValuesParser::new(FLOWS.as_slice()))]
     name: String,
 }
 

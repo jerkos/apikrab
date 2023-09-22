@@ -1,17 +1,25 @@
 mod commands;
+mod complete;
 mod db;
 mod http;
 mod json_path;
 mod ui;
 mod utils;
 
+use std::collections::HashMap;
+use std::io;
+use std::path::PathBuf;
+
 use crate::commands::history::{History, HistoryCommands};
-use clap::{Args, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
+use lazy_static::lazy_static;
 
 use crate::commands::flow::{Flow, FlowCommands};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
+use crate::complete::{complete_update, load_complete_entities};
 use crate::db::db_handler::DBHandler;
 use crate::ui::run_ui::UIRunner;
 
@@ -20,7 +28,7 @@ use crate::ui::run_ui::UIRunner;
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    commands: Commands,
 }
 
 #[derive(Subcommand)]
@@ -28,10 +36,10 @@ enum Commands {
     /// Create or update a new project with specified parameters
     Project(Project),
 
-    /// Add action to a specified url
+    /// Run a project action, flow or test suite
     Run(Run),
 
-    /// Flow information
+    /// Get information about existing flows
     Flow(Flow),
 
     /// Test suite information
@@ -39,11 +47,41 @@ enum Commands {
 
     /// List all history call
     History(History),
+
+    /// Reload completion script (only for oh-my-zsh)
+    Complete { shell: Shell },
+
+    /// Print the completion script in stdout
+    PrintCompleteScript { shell: Shell },
 }
 
-#[derive(Args)]
-struct DeleteActionArgs {
-    name: String,
+lazy_static! {
+    pub static ref HOME_DIR: PathBuf = std::env::home_dir().unwrap();
+    pub static ref ALL_ENTITES: HashMap<&'static str, Vec<String>> = load_complete_entities();
+    pub static ref ACTIONS: Vec<&'static str> = ALL_ENTITES
+        .get("actions")
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    pub static ref PROJECTS: Vec<&'static str> = ALL_ENTITES
+        .get("projects")
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    pub static ref FLOWS: Vec<&'static str> = ALL_ENTITES
+        .get("flows")
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    pub static ref TEST_SUITE: Vec<&'static str> = ALL_ENTITES
+        .get("test_suite")
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
 }
 
 #[tokio::main]
@@ -57,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
 
     // parse cli args
     let mut cli: Cli = Cli::parse();
-    match &mut cli.command {
+
+    match &mut cli.commands {
         Commands::Project(project) => match &mut project.project_commands {
             ProjectCommands::New(create_project_args) => {
                 create_project_args.create(&db_handler).await?;
@@ -116,6 +155,28 @@ async fn main() -> anyhow::Result<()> {
                 list_args.list_history(&db_handler).await?;
             }
         },
+        &mut Commands::PrintCompleteScript { shell } => {
+            generate(
+                shell,
+                &mut Cli::command(),
+                "apicrab".to_string(),
+                &mut io::stdout(),
+            );
+        }
+        &mut Commands::Complete { shell } => {
+            // write action
+            match shell {
+                Shell::Bash => {}
+                Shell::Elvish => {}
+                Shell::Fish => {}
+                Shell::PowerShell => {}
+                Shell::Zsh => {
+                    complete_update(&db_handler.conn.unwrap()).await?;
+                }
+                _ => {}
+            }
+        }
     }
+
     Ok(())
 }

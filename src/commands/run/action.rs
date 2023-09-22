@@ -1,13 +1,14 @@
 use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
 use crate::db::dto::Action;
-use crate::http;
 use crate::http::FetchResult;
 use crate::utils::{
     get_full_url, get_str_as_interpolated_map, parse_multiple_conf,
     parse_multiple_conf_as_opt_with_grouping_and_interpolation, parse_multiple_conf_with_opt,
     replace_with_conf,
 };
+use crate::{http, ACTIONS};
+use clap::builder::PossibleValuesParser;
 use clap::Args;
 use crossterm::style::Stylize;
 use futures::future;
@@ -24,7 +25,8 @@ pub struct R {
 #[derive(Args, Serialize, Deserialize, Debug, Clone)]
 pub struct RunActionArgs {
     /// action name
-    name: String,
+    #[arg(value_parser = PossibleValuesParser::new(ACTIONS.as_slice()))]
+    pub(crate) name: String,
 
     /// path params separated by a ,
     #[arg(short, long)]
@@ -40,17 +42,19 @@ pub struct RunActionArgs {
 
     /// extract path of the response
     #[arg(short, long)]
-    extract_path: Option<Vec<String>>,
+    pub extract_path: Option<Vec<String>>,
 
     /// chain with another action
     #[arg(short, long)]
-    chain: Option<Vec<String>>,
+    pub(crate) chain: Option<Vec<String>>,
 
     /// save command line as flow
     #[arg(long)]
     save_as: Option<String>,
 
+    /// save result in the clipboard
     #[arg(long)]
+    #[serde(default)]
     clipboard: bool,
 
     /// force action rerun even if its extracted value exists in current context
@@ -63,6 +67,7 @@ pub struct RunActionArgs {
 
     /// grep the output of the command
     #[arg(long)]
+    #[serde(default)]
     pub grep: bool,
 }
 

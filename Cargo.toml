@@ -26,3 +26,5 @@ futures = "0.3.28"
 assert-json-diff = "2.0.2"
 openapiv3 = "1.0.3"
 async-trait = "0.1.73"
+clap_complete = {version = "4.4.1", features = ["unstable-dynamic"] }
+lazy_static = "1.4.0"

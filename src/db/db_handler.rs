@@ -1,5 +1,6 @@
 use crate::commands::run::action::RunActionArgs;
 use crate::db::dto::{Action, Context, Flow, History, Project, TestSuite, TestSuiteInstance};
+use crate::HOME_DIR;
 use colored::Colorize;
 use sqlx::{sqlite::SqlitePool, Executor};
 
@@ -60,14 +61,13 @@ COMMIT;
 "#;
 
 /// Error messages
-static MISSING_HOME: &str = "Missing HOME env variable";
 static PROJECT_NOT_FOUND: &str =
-    "Project not found. Did you forget to create it running `qapi create-project <project_name>`?";
+    "Project not found. Did you forget to create it running `apicrab project new <project_name>`?";
 static CONNECTION_ERROR: &str = "Connection to database failed";
 
 #[derive(Clone)]
 pub struct DBHandler {
-    conn: Option<SqlitePool>,
+    pub conn: Option<SqlitePool>,
 }
 
 impl DBHandler {
@@ -83,8 +83,7 @@ impl DBHandler {
 
     /// Create database if needed at the startup of the application
     pub async fn init_db(&mut self) -> anyhow::Result<()> {
-        let home_dir = std::env::home_dir().ok_or(anyhow::anyhow!(MISSING_HOME.red()))?;
-        let path_as_str = format!("{}/.config/qapi/qapi.sqlite", home_dir.display());
+        let path_as_str = format!("{}/.config/qapi/qapi.sqlite", HOME_DIR.display());
         let path = std::path::Path::new(path_as_str.as_str());
 
         let sqlite_uri = format!("file:{}", path_as_str);

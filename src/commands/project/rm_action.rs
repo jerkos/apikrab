@@ -3,6 +3,7 @@ use clap::Args;
 
 #[derive(Args)]
 pub struct RmActionArgs {
+    /// name of the action to remove
     #[arg(short, long)]
     name: String,
 }

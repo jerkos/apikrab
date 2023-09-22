@@ -3,6 +3,8 @@ use crate::commands::project::create::CreateProjectArgs;
 use crate::commands::run::action::RunActionArgs;
 use crate::utils::parse_cli_conf_to_map;
 use colored::Colorize;
+use itertools::EitherOrBoth::Both;
+use itertools::{EitherOrBoth, Itertools};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -23,17 +25,29 @@ impl Project {
 impl Display for Project {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let test_url = match &self.test_url {
-            Some(url) => url,
-            None => "None",
+            Some(url) => url.yellow(),
+            None => "N/A".to_string().yellow(),
         };
         let prod_url = match &self.prod_url {
-            Some(url) => url,
-            None => "None",
+            Some(url) => url.yellow(),
+            None => "N/A".to_string().yellow(),
         };
+        let mut conf_keys = self
+            .get_conf()
+            .keys()
+            .map(String::from)
+            .collect::<Vec<String>>()
+            .join(",");
+        if conf_keys.is_empty() {
+            conf_keys = "N/A".to_string();
+        }
         write!(
             f,
-            "Project: {}\nTest URL: {}\nProd URL: {}\nConf: {}",
-            self.name, test_url, prod_url, self.conf
+            "{}\n   test: {} prod: {}\n   conf: {}",
+            self.name.bold().blue(),
+            test_url,
+            prod_url,
+            conf_keys.red()
         )
     }
 }
@@ -104,10 +118,16 @@ impl Display for Action {
         write!(
             f,
             "{} {} {} {}",
+            self.name.green(),
             self.verb.cyan(),
             self.url.yellow(),
-            self.name.green(),
-            self.headers
+            self.headers_as_map()
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<String>>()
+                .join(", ")
+                .bold()
+                .blue(),
         )
     }
 }
@@ -166,7 +186,39 @@ impl Flow {
 
 impl Display for Flow {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}, {}", self.name, self.run_action_args)
+        let ac = self.de_run_action_args();
+        let action = ac.name;
+        let mut chain = ac
+            .chain
+            .unwrap_or(vec![])
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<String>>();
+        chain.insert(0, action);
+
+        let extracted = ac.extract_path.unwrap_or(vec![]);
+
+        write!(f, "{}\n   ", self.name.green()).unwrap();
+        let chain_len = chain.len();
+        let mut i = 0;
+        chain.iter().zip_longest(extracted.iter()).for_each(|val| {
+            match val {
+                Both(a, e) => {
+                    write!(f, "{}({})", a.yellow(), e.blue()).unwrap();
+                }
+                EitherOrBoth::Left(a) => {
+                    write!(f, "{}", a.yellow()).unwrap();
+                }
+                EitherOrBoth::Right(e) => {
+                    write!(f, "{}", e.blue()).unwrap();
+                }
+            }
+            i += 1;
+            if i < chain_len {
+                write!(f, " -> ").unwrap();
+            }
+        });
+        Ok(())
     }
 }
 
