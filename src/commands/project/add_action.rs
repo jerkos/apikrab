@@ -1,14 +1,10 @@
-use crate::complete::complete_update;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::Action;
-use crate::PROJECTS;
-use clap::builder::PossibleValuesParser;
 use clap::Args;
 
 #[derive(Args)]
 pub struct AddActionArgs {
     /// project name
-    #[arg(value_parser = PossibleValuesParser::new(PROJECTS.as_slice()))]
     pub project_name: String,
 
     /// name of the action
@@ -41,7 +37,6 @@ impl AddActionArgs {
         let action: Action = self.into();
 
         db_handler.upsert_action(&action, false).await?;
-        complete_update(db_handler.conn.as_ref().unwrap()).await?;
         Ok(())
     }
 }

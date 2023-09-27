@@ -1,14 +1,13 @@
 use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
 use crate::db::dto::Action;
+use crate::http;
 use crate::http::FetchResult;
 use crate::utils::{
     get_full_url, get_str_as_interpolated_map, parse_multiple_conf,
     parse_multiple_conf_as_opt_with_grouping_and_interpolation, parse_multiple_conf_with_opt,
     replace_with_conf,
 };
-use crate::{http, ACTIONS};
-use clap::builder::PossibleValuesParser;
 use clap::Args;
 use crossterm::style::Stylize;
 use futures::future;
@@ -25,7 +24,6 @@ pub struct R {
 #[derive(Args, Serialize, Deserialize, Debug, Clone)]
 pub struct RunActionArgs {
     /// action name
-    #[arg(value_parser = PossibleValuesParser::new(ACTIONS.as_slice()))]
     pub(crate) name: String,
 
     /// path params separated by a ,
