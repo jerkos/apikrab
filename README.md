@@ -6,9 +6,11 @@ CLI tools to manage your json api call in the terminal for fun only !
 
 ## Philosophy
 
+
 # TL;DR
-**You can create a project, add actions to it, run them, chain them, save them as flows, and
-test them.**
+> **You can create a project, add actions to it, run them, chain them, save them as flows, and
+> test them.**
+
 
 The goal of this project is to provide a simple tool to manage your json api call in the
 terminal. It is still in very early stage of development and is not intended to be used in
@@ -247,18 +249,12 @@ provides a way to generate a completion script for your shell.
 ```bash
 apicrab completion bash > /usr/local/etc/bash_completion.d/apicrab
 ```
-Clap also provides completion for zsh, fish, powershell, elvish, and ion. 
+Clap also provides completion for zsh, fish, powershell, elvish. 
 See the clap crate !
 
-Generated script can autocomplete identifiers used for projects, actions, flows, and test suites.
 
-
-### Caveats
-When you add a new action to your project for example, to see it appearing in autocomplete, 
-you have to run again `apicrab completion bash > /usr/local/etc/bash_completion.d/apicrab` 
-and `source ~/.bashrc`.
-
-**For oh-my-zsh, this is done automatically.**
+> [!INFO]
+> For zsh, Generated script can autocomplete identifiers used for projects, actions, flows, and test suites.
 
 
 ## Built with
