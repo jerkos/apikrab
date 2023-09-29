@@ -146,7 +146,7 @@ Received response:
 ```
 # project as been created with configuration parameters CLIENT_ID and CLIENT_SECRET
 apicrab project add-action myproject -n authent\n
---static-body '{client_id:"{CLIENT_ID}", "client_secret": "{CLIENT_SECRET", "grant-type": "client_credentials"}' \n
+--static-body '{client_id:"{CLIENT_ID}", "client_secret": "{CLIENT_SECRET}", "grant-type": "client_credentials"}' \n
 -u oauth/token --form
 
 apicrab project add-action myproject -n search_by_name\n
