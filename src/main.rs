@@ -11,7 +11,10 @@ use std::path::PathBuf;
 use crate::commands::history::{History, HistoryCommands};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+use futures::StreamExt;
 use lazy_static::lazy_static;
+use sqlx::Either::{Left, Right};
+use sqlx::{Column, Executor, Row};
 
 use crate::commands::flow::{Flow, FlowCommands};
 use crate::commands::project::{Project, ProjectCommands};
@@ -42,6 +45,8 @@ enum Commands {
     History(History),
     /// Print the completion script in stdout
     PrintCompleteScript { shell: Shell },
+    /// Exec sql command
+    Sql { q: String },
 }
 
 lazy_static! {
@@ -126,6 +131,39 @@ async fn main() -> anyhow::Result<()> {
                 "apicrab".to_string(),
                 &mut io::stdout(),
             );
+        }
+        Commands::Sql { q } => {
+            let r = db_handler.conn.unwrap().fetch_many(q.as_str());
+            r.for_each(|row| async {
+                if let Ok(r) = row {
+                    match r {
+                        Left(sqlite_results) => {
+                            println!(
+                                "{} changes, {} last insert id",
+                                sqlite_results.rows_affected(),
+                                sqlite_results.last_insert_rowid()
+                            );
+                        }
+                        Right(sqlite_row) => {
+                            println!(
+                                "{}",
+                                sqlite_row
+                                    .columns()
+                                    .iter()
+                                    .fold("".to_string(), |acc, col| {
+                                        format!(
+                                            "{}{}: {}, ",
+                                            acc,
+                                            col.name(),
+                                            sqlite_row.try_get::<String, _>(col.name()).unwrap()
+                                        )
+                                    })
+                            );
+                        }
+                    }
+                }
+            })
+            .await;
         }
     }
 
