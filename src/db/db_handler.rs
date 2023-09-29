@@ -84,6 +84,7 @@ impl DBHandler {
     /// Create database if needed at the startup of the application
     pub async fn init_db(&mut self) -> anyhow::Result<()> {
         let path_as_str = format!("{}/.config/qapi/qapi.sqlite", HOME_DIR.display());
+
         let path = std::path::Path::new(path_as_str.as_str());
 
         let sqlite_uri = format!("file:{}", path_as_str);

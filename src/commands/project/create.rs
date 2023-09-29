@@ -21,23 +21,36 @@ pub struct CreateProjectArgs {
     pub conf: Option<Vec<String>>,
 
     /// url or path to openapi file
-    #[arg(short, long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub from_openapi: Option<String>,
+
+    /// url or path to postman collection file
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
+    pub from_postman: Option<String>,
 }
 
 impl CreateProjectArgs {
     pub fn get_importer<'a>(
         &'a self,
         db_handler: &'a DBHandler,
-    ) -> Option<(impl Import + 'a, &'a str)> {
+    ) -> Option<(Box<dyn Import + Sync + 'a>, &'a str)> {
         #[allow(clippy::manual_map)]
-        match &self.from_openapi {
-            Some(path) => Some((
-                commands::import::openapi::OpenapiV3Importer { db_handler },
-                path,
-            )),
-            None => None,
+        if self.from_openapi.is_some() && self.from_postman.is_some() {
+            return None;
         }
+        if self.from_openapi.is_some() {
+            return Some((
+                Box::new(commands::import::openapi::OpenapiV3Importer { db_handler }),
+                self.from_openapi.as_ref().unwrap(),
+            ));
+        }
+        if self.from_postman.is_some() {
+            return Some((
+                Box::new(commands::import::postman::PostmanImporter { db_handler }),
+                self.from_postman.as_ref().unwrap(),
+            ));
+        }
+        None
     }
     pub async fn create(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
         match self.get_importer(db_handler) {

@@ -1,13 +1,10 @@
 use crate::db::db_handler::DBHandler;
-use crate::PROJECTS;
-use clap::builder::PossibleValuesParser;
 use clap::Args;
 use colored::Colorize;
 
 #[derive(Args)]
 pub struct ProjectInfoArgs {
     /// Project name
-    #[arg(value_parser = PossibleValuesParser::new(PROJECTS.as_slice()))]
     name: String,
 }
 
