@@ -5,14 +5,13 @@ use async_recursion::async_recursion;
 use async_trait::async_trait;
 use postman_collection::v2_1_0;
 use postman_collection::v2_1_0::{HeaderUnion, Items, RequestUnion};
-use std::borrow::Cow;
 use std::collections::HashMap;
 
-fn replace_postman_path(path: &str) -> Cow<str> {
+fn replace_postman_path(path: &str) -> &str {
     if let Some(stripped) = path.strip_prefix(':') {
-        Cow::Owned(format!("{{{}}}", stripped))
+        stripped
     } else {
-        Cow::Borrowed(path)
+        path
     }
 }
 

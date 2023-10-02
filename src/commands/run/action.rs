@@ -276,7 +276,7 @@ impl RunActionArgs {
             xtended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
 
             // retrieve test url
-            let test_url = project.test_url.as_ref().expect("Unknown URL").clone();
+            let test_url = project.test_url.as_ref().expect("Unknown URL");
 
             let computed_urls =
                 Self::get_computed_urls(path_params, test_url.as_str(), &action.url, &xtended_ctx);
