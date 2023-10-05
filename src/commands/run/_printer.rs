@@ -1,6 +1,5 @@
 use arboard::Clipboard;
 
-#[derive(Default)]
 pub struct Printer {
     pub no_print: bool,
     pub clipboard: bool,

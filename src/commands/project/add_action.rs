@@ -23,13 +23,16 @@ pub struct AddActionArgs {
     #[arg(short, long)]
     pub static_body: Option<String>,
 
-    // adding header separated by a :
+    /// adding header separated by a :
     #[arg(long)]
     pub header: Option<Vec<String>>,
 
-    // shortcut to add a form encoded header
-    #[arg(short, long)]
-    pub form: bool,
+    /// shortcut to add a form encoded header
+    #[arg(long)]
+    pub form_data: bool,
+
+    #[arg(long)]
+    pub url_encoded: bool,
 }
 
 impl AddActionArgs {

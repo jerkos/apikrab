@@ -5,12 +5,15 @@ use crate::http::FetchResult;
 use crate::json_path;
 use colored::Colorize;
 use crossterm::style::Stylize;
+use indicatif::ProgressBar;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
+/// Print response and extracted values
 pub struct HttpResult<'a> {
-    pub db_handler: &'a DBHandler,
-    pub fetch_result: &'a anyhow::Result<FetchResult>,
-    pub printer: &'a mut Printer,
+    pub(crate) db_handler: &'a DBHandler,
+    pub(crate) fetch_result: &'a anyhow::Result<FetchResult>,
+    pub(crate) printer: &'a mut Printer,
 }
 
 impl<'a> HttpResult<'a> {
@@ -30,6 +33,7 @@ impl<'a> HttpResult<'a> {
         &mut self,
         (pattern_to_extract, value_name): (&str, Option<&str>),
         response: &str,
+        pb: &ProgressBar,
     ) -> Option<String> {
         //anyhow::Result<String> {
         let extracted = json_path::json_path(response, pattern_to_extract);
@@ -52,38 +56,42 @@ impl<'a> HttpResult<'a> {
         }
 
         self.printer.p_info(|| {
-            println!(
-                "Extraction of {}: {} {}",
-                pattern_to_extract.bright_green(),
-                extracted_as_string.bright_magenta(),
-                value_name
-                    .map(|v| format!("saved as {}", v.bright_yellow()))
-                    .unwrap_or("".to_string())
-            )
+            pb.suspend(|| {
+                println!(
+                    "Extraction of {}: {} {}",
+                    pattern_to_extract.bright_green(),
+                    extracted_as_string.bright_magenta(),
+                    value_name
+                        .map(|v| format!("saved as {}", v.bright_yellow()))
+                        .unwrap_or("".to_string())
+                )
+            });
         });
 
         Some(extracted_as_string)
     }
 
-    fn print_response(&mut self, response: &str) -> anyhow::Result<()> {
+    fn print_response(&mut self, response: &str, pb: &ProgressBar) -> anyhow::Result<()> {
         // grep is superior to no_print option
-        self.printer.p_response(|| println!("{}", response));
+        self.printer
+            .p_response(|| pb.suspend(|| println!("{}", response)));
         // print response as info if needed
         self.printer.p_info(|| {
-            println!("Received response: ");
+            pb.suspend(|| println!("Received response: "));
             let response_as_value = serde_json::from_str::<serde_json::Value>(response)
                 .unwrap_or(serde_json::Value::Null);
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response_as_value)
-                    .unwrap_or("".to_string())
-                    .split('\n')
-                    .take(10)
-                    .collect::<Vec<&str>>()
-                    .join("\n")
-                    .red()
-            );
-            println!("...");
+            pb.suspend(|| {
+                println!(
+                    "{}\n...",
+                    serde_json::to_string_pretty(&response_as_value)
+                        .unwrap_or("".to_string())
+                        .split('\n')
+                        .take(10)
+                        .collect::<Vec<&str>>()
+                        .join("\n")
+                        .red()
+                )
+            });
         });
 
         // save response to clipboard if necessary
@@ -94,28 +102,15 @@ impl<'a> HttpResult<'a> {
     pub async fn handle_result(
         &mut self,
         action: &mut Action,
-        body: &Option<String>,
+        body: &Option<Cow<'a, str>>,
         extract_pattern: &Option<HashMap<String, Option<String>>>,
         ctx: &mut HashMap<String, String>,
+        pb: &ProgressBar,
     ) -> anyhow::Result<()> {
         match self.fetch_result {
-            Ok(FetchResult {
-                response, status, ..
-            }) => {
-                let status_code = format!("Status code: {}", status);
-                if status >= &400 {
-                    self.printer
-                        .p_info(|| println!("{}", status_code.bold().red()));
-                    self.printer.p_response(|| println!("{}", response));
-                    return Ok(());
-                }
-
-                // Successful request
-                self.printer
-                    .p_info(|| println!("{}", status_code.bold().green()));
-
+            Ok(FetchResult { response, .. }) => {
                 action.response_example = Some(response.clone());
-                action.body_example = body.clone();
+                action.body_example = body.as_ref().map(|b| b.to_string());
                 self.db_handler.upsert_action(action, true).await?;
 
                 match extract_pattern {
@@ -125,7 +120,7 @@ impl<'a> HttpResult<'a> {
                             .iter()
                             .filter_map(|(pattern, value_name)| {
                                 let extracted_pattern =
-                                    self.extract_pattern((pattern, None), response);
+                                    self.extract_pattern((pattern, None), response, pb);
                                 if let (Some(value_name), Some(extracted_pattern)) =
                                     (value_name, extracted_pattern.as_ref())
                                 {
@@ -139,7 +134,8 @@ impl<'a> HttpResult<'a> {
 
                         // to clip if necessary and print response if grepped
                         self.printer.maybe_to_clip(&concat_pattern);
-                        self.printer.p_response(|| println!("{}", concat_pattern));
+                        self.printer
+                            .p_response(|| pb.suspend(|| println!("{}", concat_pattern)));
 
                         self.db_handler
                             .insert_conf(&Context {
@@ -148,7 +144,7 @@ impl<'a> HttpResult<'a> {
                             })
                             .await?;
                     }
-                    None => self.print_response(response)?,
+                    None => self.print_response(response, pb)?,
                 }
             }
             Err(e) => println!("Error: {}", e),

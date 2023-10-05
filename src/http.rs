@@ -1,10 +1,11 @@
-use crossterm::style::Stylize;
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fs;
 use std::time::{Duration, Instant};
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::multipart::{Form, Part};
+use reqwest::Method;
 
-use crate::commands::run::_printer::Printer;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::History;
 
@@ -15,8 +16,12 @@ pub struct FetchResult {
     pub duration: Duration,
 }
 
+static URL_ENCODED: &str = "application/x-www-form-urlencoded";
+static FORM_DATA: &str = "multipart/form-data";
+static APPLICATION_JSON: &str = "application/json";
+
 pub struct Api<'a> {
-    client: reqwest::Client,
+    pub(crate) client: reqwest::Client,
     pub db_handler: &'a DBHandler,
 }
 
@@ -28,12 +33,13 @@ impl<'a> Api<'a> {
         }
     }
 
+    /// insert history line
     pub async fn save_history_line(
         &self,
         action_name: &str,
         url: &str,
         headers: &HashMap<String, String>,
-        body: &Option<String>,
+        body: &Option<Cow<'a, str>>,
         fetch_result: &FetchResult,
     ) -> anyhow::Result<()> {
         // insert history line !
@@ -42,7 +48,7 @@ impl<'a> Api<'a> {
                 id: None,
                 action_name: action_name.to_string(),
                 url: url.to_string(),
-                body: body.clone(),
+                body: body.as_ref().map(|s| s.to_string()),
                 headers: Some(serde_json::to_string(headers)?),
                 response: Some(fetch_result.response.clone()),
                 status_code: fetch_result.status,
@@ -62,47 +68,15 @@ impl<'a> Api<'a> {
         verb: &str,
         headers: &HashMap<String, String>,
         query_params: &Option<HashMap<String, String>>,
-        body: &Option<String>,
-        printer: &Printer,
+        body: &Option<Cow<'a, str>>,
     ) -> anyhow::Result<FetchResult> {
-        printer.p_info(|| {
-            println!(
-                "{} {}?{}",
-                verb.yellow(),
-                url.red(),
-                query_params
-                    .as_ref()
-                    .map(|v| v
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<String>>()
-                        .join("&"))
-                    .unwrap_or("".to_string())
-                    .green()
-            )
-        });
-
-        let form = headers
-            .get("Content-Type")
-            .map(|v| v == "application/x-www-form-urlencoded");
-
         // building request
         let mut builder = match verb {
-            "POST" => match form {
-                Some(true) => self.client.post(url).form(
-                    &serde_json::from_str::<HashMap<String, String>>(
-                        body.as_ref()
-                            .map(|v| v.as_str())
-                            .expect("A body was expected"),
-                    )
-                    .expect("Expected body for POST request"),
-                ),
-                _ => self
-                    .client
-                    .post(url)
-                    .body(body.clone().expect("Expected body for POST request")),
-            },
+            "POST" => self.client.post(url),
+            "PUT" => self.client.put(url),
             "GET" => self.client.get(url),
+            "DELETE" => self.client.delete(url),
+            "OPTIONS" => self.client.request(Method::OPTIONS, url),
             _ => panic!("Unsupported verb: {}", verb),
         };
 
@@ -111,20 +85,50 @@ impl<'a> Api<'a> {
             builder = builder.query(query_params.as_ref().unwrap());
         }
 
-        // headers
-        let mut header_map = HeaderMap::new();
-        for (k, v) in headers {
-            header_map.insert(
-                k.parse::<HeaderName>().expect("Unparseable header name"),
-                HeaderValue::from_bytes(v.as_bytes()).expect("Unparseable header value"),
-            );
-        }
+        // headers are automatically set !
+
+        // body
+        let content_type = headers
+            .get(reqwest::header::CONTENT_TYPE.as_str())
+            .map(String::as_str)
+            .unwrap_or(APPLICATION_JSON);
+        let is_url_encoded = content_type == URL_ENCODED;
+        let is_form_data = content_type == FORM_DATA;
+
+        builder = match (is_url_encoded, is_form_data) {
+            (true, true) => panic!("Cannot have both url encoded and form data"),
+            (false, false) => {
+                if body.is_some() {
+                    builder = builder.body(body.as_ref().unwrap().to_string());
+                }
+                builder
+            }
+            (true, false) => builder.form(&serde_json::from_str::<HashMap<String, String>>(
+                body.as_ref().unwrap(),
+            )?),
+            (false, true) => {
+                let mut form = Form::new();
+                let body = body.as_ref().unwrap();
+                for (part_name, v) in serde_json::from_str::<HashMap<String, String>>(body)? {
+                    // handle file upload
+                    if v.starts_with('@') {
+                        let file_path = v.trim_start_matches('@');
+                        form = form.part(
+                            part_name,
+                            Part::bytes(fs::read(file_path)?).file_name(file_path.to_string()),
+                        );
+                        continue;
+                    }
+                    form = form.text(part_name, v);
+                }
+                builder.multipart(form)
+            }
+        };
 
         // launching request
         let start = Instant::now();
-        let response = builder.headers(header_map).send().await?;
+        let response = builder.send().await?;
         let duration = start.elapsed();
-        printer.p_info(|| println!("Request took: {:?}", duration));
 
         // getting status and response
         let status = response.status();

@@ -1,11 +1,19 @@
+use crate::db::dto::Action;
+use crossterm::style::Stylize;
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rand::*;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-pub fn replace_with_conf(str: &str, conf: &HashMap<String, String>) -> String {
-    conf.iter().fold(str.to_string(), |acc, (k, v)| {
+pub fn replace_with_conf<'a>(str: &'a str, conf: &HashMap<String, String>) -> Cow<'a, str> {
+    if !str.contains('{') {
+        return str.into();
+    }
+    let interpolated = conf.iter().fold(str.to_string(), |acc, (k, v)| {
         acc.replace(format!("{{{k}}}", k = k).as_str(), v)
-    })
+    });
+    interpolated.into()
 }
 
 /// Parse a conf string to a hashmap
@@ -150,6 +158,38 @@ pub fn random_emoji() -> char {
     char::from_u32(x).unwrap_or('💔')
 }
 
+/// Create an undefined spinner
+/// Should enable tick after its creation
+/// to be used in a multi progress bar
+pub fn spinner(message: Option<&str>) -> ProgressBar {
+    let p = ProgressBar::new_spinner();
+    p.set_style(
+        ProgressStyle::with_template("{spinner:.blue} {msg}")
+            .unwrap()
+            // For more spinners check out the cli-spinners project:
+            // https://github.com/sindresorhus/cli-spinners/blob/master/spinners.json
+            .tick_strings(
+                &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"], /*
+                                                               "▹▹▹▹▹",
+                                                               "▸▹▹▹▹",
+                                                               "▹▸▹▹▹",
+                                                               "▹▹▸▹▹",
+                                                               "▹▹▹▸▹",
+                                                               "▹▹▹▹▸",
+                                                               "▪▪▪▪▪",
+                                                           ]
+                                                           */
+            ),
+    );
+    p.set_message(
+        message
+            .map(String::from)
+            .unwrap_or("Loading...".to_string()),
+    );
+    p
+}
+
+/// Format a query given an action, an url and query params
 pub fn get_full_url(url: &str, query_params: &Option<HashMap<String, String>>) -> String {
     match query_params {
         Some(query_params) => {
@@ -162,4 +202,17 @@ pub fn get_full_url(url: &str, query_params: &Option<HashMap<String, String>>) -
         }
         None => url.to_string(),
     }
+}
+
+/// Format a query given an action, an url and query params
+pub fn format_query(
+    action: &Action,
+    computed_url: &str,
+    query_params: &Option<HashMap<String, String>>,
+) -> String {
+    format!(
+        "{} {}",
+        action.verb.clone().yellow(),
+        get_full_url(computed_url, query_params).green()
+    )
 }

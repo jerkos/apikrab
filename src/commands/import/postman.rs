@@ -3,6 +3,7 @@ use crate::db::db_handler::DBHandler;
 use crate::db::dto::{Action, Project};
 use async_recursion::async_recursion;
 use async_trait::async_trait;
+use indicatif::{MultiProgress, ProgressBar};
 use postman_collection::v2_1_0;
 use postman_collection::v2_1_0::{HeaderUnion, Items, RequestUnion};
 use std::collections::HashMap;
@@ -88,7 +89,22 @@ impl<'a> PostmanImporter<'a> {
     }
 
     #[async_recursion]
-    pub async fn insert_actions(&self, items: &[Items], name: &str, project_name: &str) {
+    pub async fn insert_actions(
+        &self,
+        items: &[Items],
+        name: &str,
+        project_name: &str,
+        p: Option<ProgressBar>,
+    ) {
+        let mut m: Option<MultiProgress> = None;
+        if p.is_none() {
+            m = Some(MultiProgress::new());
+        }
+        let p1 = p.unwrap_or_else(|| {
+            m.as_ref()
+                .unwrap()
+                .add(indicatif::ProgressBar::new(items.len() as u64))
+        });
         for (i, item) in items.iter().enumerate() {
             let fallback = &item
                 .name
@@ -97,14 +113,18 @@ impl<'a> PostmanImporter<'a> {
                 .unwrap_or(format!("{}-{}", name, i));
             let name = item.id.as_ref().unwrap_or(fallback);
             if item.item.is_some() {
-                self.insert_actions(item.item.as_ref().unwrap(), name, project_name)
+                let sub_p = m.as_ref().unwrap().add(indicatif::ProgressBar::new(
+                    item.item.as_ref().unwrap().len() as u64,
+                ));
+                self.insert_actions(item.item.as_ref().unwrap(), name, project_name, Some(sub_p))
                     .await;
             } else if let Some(action) = Self::items_to_action(item, name, project_name) {
-                let r = self.db_handler.upsert_action(&action, false).await;
+                let r = self.db_handler.upsert_action(&action, true).await;
                 if r.is_err() {
                     println!("error upserting action: {}", r.err().unwrap());
                 }
             }
+            p1.inc(1);
         }
     }
 }
@@ -131,7 +151,7 @@ impl<'a> Import for PostmanImporter<'a> {
         // upsert project first
         self.db_handler.upsert_project(project).await?;
 
-        self.insert_actions(&collection.item, &collection.info.name, &project.name)
+        self.insert_actions(&collection.item, &collection.info.name, &project.name, None)
             .await;
         Ok(())
     }
