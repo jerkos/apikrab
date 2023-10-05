@@ -93,12 +93,19 @@ impl Action {
 impl From<&AddActionArgs> for Action {
     fn from(value: &AddActionArgs) -> Self {
         let mut headers = parse_cli_conf_to_map(&value.header);
-        if value.form {
+        if value.url_encoded {
             headers.insert(
-                "Content-Type".to_string(),
+                reqwest::header::CONTENT_TYPE.to_string(),
                 "application/x-www-form-urlencoded".to_string(),
             );
         }
+        if value.form_data {
+            headers.insert(
+                reqwest::header::CONTENT_TYPE.to_string(),
+                "multipart/form-data".to_string(),
+            );
+        }
+
         let headers_as_str = serde_json::to_string(&headers).expect("Error serializing headers");
         Action {
             name: value.name.clone(),

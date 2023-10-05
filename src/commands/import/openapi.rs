@@ -9,15 +9,12 @@ use tokio::io::AsyncReadExt;
 pub trait Import {
     /// load a file or url
     async fn load(&self, file_or_url: &str) -> anyhow::Result<String> {
-        println!("{}", file_or_url);
         let mut r = File::open(file_or_url).await;
 
         match r {
             Ok(ref mut file) => {
-                println!("file found");
                 let mut contents = String::new();
                 if (file.read_to_string(&mut contents).await).is_ok() {
-                    println!("file read");
                     Ok(contents)
                 } else {
                     Err(anyhow::anyhow!(

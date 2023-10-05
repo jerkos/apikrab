@@ -50,7 +50,7 @@ enum Commands {
 }
 
 lazy_static! {
-    pub static ref HOME_DIR: PathBuf = std::env::home_dir().unwrap();
+    pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
 }
 
 #[tokio::main]
