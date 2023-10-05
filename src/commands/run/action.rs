@@ -79,7 +79,7 @@ impl RunActionArgs {
         body: &str,
     ) -> Option<Cow<'a, str>> {
         if str.contains('{') {
-            return Some(interpolated_body.clone());
+            return Some(interpolated_body);
         }
         let body_as_map = parse_multiple_conf(body);
         Some(Cow::Owned(
