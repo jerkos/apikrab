@@ -1,3 +1,4 @@
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
@@ -85,7 +86,15 @@ impl<'a> Api<'a> {
             builder = builder.query(query_params.as_ref().unwrap());
         }
 
-        // headers are automatically set !
+        // Add custom headers
+        let mut header_map = HeaderMap::new();
+        for (k, v) in headers {
+            header_map.insert(
+                k.parse::<HeaderName>().expect("Unparseable header name"),
+                HeaderValue::from_bytes(v.as_bytes()).expect("Unparseable header value"),
+            );
+        }
+        builder = builder.headers(header_map);
 
         // body
         let content_type = headers

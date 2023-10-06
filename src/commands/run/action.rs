@@ -24,6 +24,24 @@ pub struct R {
     pub ctx: HashMap<String, String>,
 }
 
+pub enum BodyType<'bt> {
+    Static(&'bt str),
+    LastSuccessfulBody(&'bt str),
+    Empty,
+    Default(&'bt str),
+}
+
+impl<'bt> From<&'bt str> for BodyType<'bt> {
+    fn from(s: &'bt str) -> BodyType<'bt> {
+        match s {
+            "" => BodyType::Empty,
+            "LAST_SUCCESSFUL_BODY" => BodyType::LastSuccessfulBody(s),
+            "STATIC" => BodyType::Static(s),
+            _ => BodyType::Default(s),
+        }
+    }
+}
+
 #[derive(Args, Serialize, Deserialize, Debug, Clone)]
 pub struct RunActionArgs {
     /// action name
@@ -100,13 +118,19 @@ impl RunActionArgs {
 
         match &interpolated_body {
             // if static body exists, use it otherwise None is used
-            Cow::Borrowed(str) => match *str {
-                "" => Some(Cow::Borrowed(action.static_body.as_ref()?.as_str())),
-                "LAST_SUCCESSFUL_BODY" => {
-                    Some(Cow::Borrowed(action.body_example.as_ref()?.as_str()))
+            Cow::Borrowed(str) => {
+                let body_type: BodyType = (*str).into();
+                match body_type {
+                    BodyType::Empty => None,
+                    BodyType::Static(_) => {
+                        Some(Cow::Borrowed(action.static_body.as_ref()?.as_str()))
+                    }
+                    BodyType::LastSuccessfulBody(_) => {
+                        Some(Cow::Borrowed(action.body_example.as_ref()?.as_str()))
+                    }
+                    BodyType::Default(str) => Self::_get_body(str, interpolated_body.clone(), body),
                 }
-                _ => Self::_get_body(str, interpolated_body.clone(), body),
-            },
+            }
             // body had some interpolated value
             Cow::Owned(body_value) => Self::_get_body(body_value, interpolated_body.clone(), body),
         }
