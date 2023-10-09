@@ -6,14 +6,17 @@ use rand::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+/// returning a cow here to avoid cloning the string
+/// body is supposed to be a json string and therefore
+/// can be quite long
 pub fn replace_with_conf<'a>(str: &'a str, conf: &HashMap<String, String>) -> Cow<'a, str> {
-    if !str.contains('{') {
-        return str.into();
+    if !str.contains("{{") {
+        return Cow::Borrowed(str);
     }
     let interpolated = conf.iter().fold(str.to_string(), |acc, (k, v)| {
         acc.replace(format!("{{{k}}}", k = k).as_str(), v)
     });
-    interpolated.into()
+    Cow::Owned(interpolated)
 }
 
 /// Parse a conf string to a hashmap
@@ -62,87 +65,53 @@ pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<&str, &str>> {
     }
 }
 
-pub fn get_str_as_interpolated_map<'a>(
-    data: &'a str,
+pub fn get_str_as_interpolated_map(
+    data: &str,
     ctx: &HashMap<String, String>,
-) -> Option<HashMap<Cow<'a, str>, Cow<'a, str>>> {
+) -> Option<HashMap<String, String>> {
     let interpolated = replace_with_conf(data, ctx);
-    match interpolated {
-        Cow::Borrowed(str) => {
-            let p = parse_multiple_conf_as_opt(str);
-            p.map(|p| {
-                p.iter()
-                    .map(|(k, v)| ((*k).into(), (*v).into()))
-                    .collect::<HashMap<_, _>>()
-            })
-        }
-        Cow::Owned(str) => {
-            let p = parse_multiple_conf_as_opt(&str);
-            p.map(|p| {
-                p.iter()
-                    .map(|(k, v)| ((*k).to_string().into(), (*v).to_string().into()))
-                    .collect::<HashMap<_, _>>()
-            })
-        }
+    let p = parse_multiple_conf_as_opt(&interpolated);
+    if p.is_none() {
+        return None;
     }
+
+    Some(
+        p.unwrap()
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+    )
 }
 
-pub fn _parse_multiple_conf_as_opt_with_grouping(
-    str: Cow<str>,
-) -> HashMap<Cow<str>, Vec<Cow<str>>> {
-    match str {
-        Cow::Borrowed(str) => str
-            .split(',')
-            .map(|str| {
-                let mut split = str.split(':');
-                (
-                    Cow::Borrowed(split.next().expect("key not found")),
-                    split
-                        .next()
-                        .expect("value not found")
-                        .split('|')
-                        .map(Cow::Borrowed)
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .group_by(|(k, _)| k.clone())
-            .into_iter()
-            .map(|(k, group)| {
-                (
-                    k,
-                    group.flat_map(|(_, values)| values.into_iter()).collect(),
-                )
-            })
-            .collect(),
-        Cow::Owned(str) => str
-            .split(',')
-            .map(|str| {
-                let mut split = str.split(':');
-                (
-                    Cow::Owned::<str>(split.next().expect("key not found").to_string()),
-                    split
-                        .next()
-                        .expect("value not found")
-                        .split('|')
-                        .map(|v| Cow::Owned(v.to_string()))
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .group_by(|(k, _)| k.clone())
-            .into_iter()
-            .map(|(k, group)| {
-                (
-                    k,
-                    group.flat_map(|(_, values)| values.into_iter()).collect(),
-                )
-            })
-            .collect(),
-    }
+pub fn _parse_multiple_conf_as_opt_with_grouping(str: Cow<str>) -> HashMap<String, Vec<String>> {
+    str.split(',')
+        .map(|str| {
+            let mut split = str.split(':');
+            (
+                split.next().expect("key not found").to_string(),
+                split
+                    .next()
+                    .expect("value not found")
+                    .split('|')
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .group_by(|(k, _)| k.clone())
+        .into_iter()
+        .map(|(k, group)| {
+            (
+                k,
+                group.flat_map(|(_, values)| values.into_iter()).collect(),
+            )
+        })
+        .collect()
 }
 
 pub fn parse_multiple_conf_as_opt_with_grouping(
     conf: Cow<str>,
-) -> Option<HashMap<Cow<str>, Vec<Cow<str>>>> {
+) -> Option<HashMap<String, Vec<String>>> {
     if conf.is_empty() || conf.contains('{') {
         return None;
     }
@@ -152,10 +121,10 @@ pub fn parse_multiple_conf_as_opt_with_grouping(
     Some(value)
 }
 
-pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation<'a>(
-    conf: &'a str,
+pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation(
+    conf: &str,
     ctx: &HashMap<String, String>,
-) -> Vec<Option<HashMap<Cow<'a, str>, Cow<'a, str>>>> {
+) -> Vec<Option<HashMap<String, String>>> {
     let p = replace_with_conf(conf, ctx);
     let parsed_conf = parse_multiple_conf_as_opt_with_grouping(p);
     match parsed_conf {
@@ -204,9 +173,7 @@ pub fn spinner(message: Option<&str>) -> ProgressBar {
             .unwrap()
             // For more spinners check out the cli-spinners project:
             // https://github.com/sindresorhus/cli-spinners/blob/master/spinners.json
-            .tick_strings(
-                &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
-            ),
+            .tick_strings(&["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]),
     );
     p.set_message(
         message
@@ -217,10 +184,7 @@ pub fn spinner(message: Option<&str>) -> ProgressBar {
 }
 
 /// Format a query given an action, an url and query params
-pub fn get_full_url(
-    url: &str,
-    query_params: Option<&HashMap<Cow<'_, str>, Cow<'_, str>>>,
-) -> String {
+pub fn get_full_url(url: &str, query_params: Option<&HashMap<String, String>>) -> String {
     match query_params {
         Some(query_params) => {
             let query_params_as_str = query_params
@@ -238,7 +202,7 @@ pub fn get_full_url(
 pub fn format_query(
     action: &Action,
     computed_url: &str,
-    query_params: Option<&HashMap<Cow<'_, str>, Cow<'_, str>>>,
+    query_params: Option<&HashMap<String, String>>,
 ) -> String {
     format!(
         "{} {}",
