@@ -17,37 +17,25 @@ pub fn replace_with_conf<'a>(str: &'a str, conf: &HashMap<String, String>) -> Co
 }
 
 /// Parse a conf string to a hashmap
-pub fn parse_cli_conf_to_map(conf: &Option<Vec<String>>) -> HashMap<String, String> {
+pub fn parse_cli_conf_to_map(conf: Option<&Vec<String>>) -> HashMap<&str, &str> {
     match conf {
         Some(conf) => conf
             .iter()
             .map(|s| s.split(':').collect::<Vec<_>>())
-            .map(|v| {
-                (
-                    v[0].to_string(),
-                    v[1..v.len()]
-                        .iter()
-                        .map(|value| value.to_string())
-                        .collect::<Vec<String>>()
-                        .join(":"),
-                )
-            })
+            .map(|v| (v[0], v[1]))
             .collect(),
 
         None => HashMap::new(),
     }
 }
 
-pub fn parse_multiple_conf(conf: &str) -> HashMap<String, String> {
+pub fn parse_multiple_conf(conf: &str) -> HashMap<&str, &str> {
     if !conf.contains('{') {
         return conf
             .split(',')
             .map(|s| {
                 let mut split = s.split(':');
-                (
-                    split.next().unwrap().to_string(),
-                    split.next().unwrap().to_string(),
-                )
+                (split.next().unwrap(), split.next().unwrap())
             })
             .collect::<HashMap<_, _>>();
     }
@@ -55,19 +43,16 @@ pub fn parse_multiple_conf(conf: &str) -> HashMap<String, String> {
 }
 
 /// only for extracted path
-pub fn parse_multiple_conf_with_opt(conf: &str) -> HashMap<String, Option<String>> {
+pub fn parse_multiple_conf_with_opt(conf: &str) -> HashMap<&str, Option<&str>> {
     conf.split(',')
         .map(|s| {
             let mut split = s.split(':');
-            (
-                split.next().unwrap().to_string(),
-                split.next().map(String::from),
-            )
+            (split.next().unwrap(), split.next())
         })
         .collect::<HashMap<_, _>>()
 }
 
-pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<String, String>> {
+pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<&str, &str>> {
     match conf {
         "" => None,
         _ => {
@@ -77,51 +62,102 @@ pub fn parse_multiple_conf_as_opt(conf: &str) -> Option<HashMap<String, String>>
     }
 }
 
-pub fn get_str_as_interpolated_map(
-    data: &str,
+pub fn get_str_as_interpolated_map<'a>(
+    data: &'a str,
     ctx: &HashMap<String, String>,
-) -> Option<HashMap<String, String>> {
-    parse_multiple_conf_as_opt(&replace_with_conf(data, ctx))
-}
-
-pub fn parse_multiple_conf_as_opt_with_grouping(
-    conf: &str,
-) -> Option<HashMap<String, Vec<String>>> {
-    match conf {
-        "" => None,
-        _ => {
-            if conf.contains('{') {
-                println!("json is not supported for grouping");
-                return None;
-            }
-            let value: HashMap<String, Vec<String>> = conf
-                .split(',')
-                .map(|s| {
-                    let mut split = s.split(':');
-                    let key = split.next().expect("key not found");
-                    let value = split.next().expect("value not found");
-                    let split: Vec<String> = value.split('|').map(String::from).collect();
-                    (key, split)
-                })
-                .group_by(|(k, _)| k.to_string())
-                .into_iter()
-                .map(|(k, group)| {
-                    let values: Vec<String> =
-                        group.flat_map(|(_, values)| values.into_iter()).collect();
-                    (k, values)
-                })
-                .collect();
-
-            Some(value)
+) -> Option<HashMap<Cow<'a, str>, Cow<'a, str>>> {
+    let interpolated = replace_with_conf(data, ctx);
+    match interpolated {
+        Cow::Borrowed(str) => {
+            let p = parse_multiple_conf_as_opt(str);
+            p.map(|p| {
+                p.iter()
+                    .map(|(k, v)| ((*k).into(), (*v).into()))
+                    .collect::<HashMap<_, _>>()
+            })
+        }
+        Cow::Owned(str) => {
+            let p = parse_multiple_conf_as_opt(&str);
+            p.map(|p| {
+                p.iter()
+                    .map(|(k, v)| ((*k).to_string().into(), (*v).to_string().into()))
+                    .collect::<HashMap<_, _>>()
+            })
         }
     }
 }
 
-pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation(
-    conf: &str,
+pub fn _parse_multiple_conf_as_opt_with_grouping(
+    str: Cow<str>,
+) -> HashMap<Cow<str>, Vec<Cow<str>>> {
+    match str {
+        Cow::Borrowed(str) => str
+            .split(',')
+            .map(|str| {
+                let mut split = str.split(':');
+                (
+                    Cow::Borrowed(split.next().expect("key not found")),
+                    split
+                        .next()
+                        .expect("value not found")
+                        .split('|')
+                        .map(Cow::Borrowed)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .group_by(|(k, _)| k.clone())
+            .into_iter()
+            .map(|(k, group)| {
+                (
+                    k,
+                    group.flat_map(|(_, values)| values.into_iter()).collect(),
+                )
+            })
+            .collect(),
+        Cow::Owned(str) => str
+            .split(',')
+            .map(|str| {
+                let mut split = str.split(':');
+                (
+                    Cow::Owned::<str>(split.next().expect("key not found").to_string()),
+                    split
+                        .next()
+                        .expect("value not found")
+                        .split('|')
+                        .map(|v| Cow::Owned(v.to_string()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .group_by(|(k, _)| k.clone())
+            .into_iter()
+            .map(|(k, group)| {
+                (
+                    k,
+                    group.flat_map(|(_, values)| values.into_iter()).collect(),
+                )
+            })
+            .collect(),
+    }
+}
+
+pub fn parse_multiple_conf_as_opt_with_grouping(
+    conf: Cow<str>,
+) -> Option<HashMap<Cow<str>, Vec<Cow<str>>>> {
+    if conf.is_empty() || conf.contains('{') {
+        return None;
+    }
+
+    let value = _parse_multiple_conf_as_opt_with_grouping(conf);
+
+    Some(value)
+}
+
+pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation<'a>(
+    conf: &'a str,
     ctx: &HashMap<String, String>,
-) -> Vec<Option<HashMap<String, String>>> {
-    let parsed_conf = parse_multiple_conf_as_opt_with_grouping(&replace_with_conf(conf, ctx));
+) -> Vec<Option<HashMap<Cow<'a, str>, Cow<'a, str>>>> {
+    let p = replace_with_conf(conf, ctx);
+    let parsed_conf = parse_multiple_conf_as_opt_with_grouping(p);
     match parsed_conf {
         None => vec![None],
         Some(possible_values_by_key) => possible_values_by_key
@@ -169,16 +205,7 @@ pub fn spinner(message: Option<&str>) -> ProgressBar {
             // For more spinners check out the cli-spinners project:
             // https://github.com/sindresorhus/cli-spinners/blob/master/spinners.json
             .tick_strings(
-                &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"], /*
-                                                               "▹▹▹▹▹",
-                                                               "▸▹▹▹▹",
-                                                               "▹▸▹▹▹",
-                                                               "▹▹▸▹▹",
-                                                               "▹▹▹▸▹",
-                                                               "▹▹▹▹▸",
-                                                               "▪▪▪▪▪",
-                                                           ]
-                                                           */
+                &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
             ),
     );
     p.set_message(
@@ -190,7 +217,10 @@ pub fn spinner(message: Option<&str>) -> ProgressBar {
 }
 
 /// Format a query given an action, an url and query params
-pub fn get_full_url(url: &str, query_params: &Option<HashMap<String, String>>) -> String {
+pub fn get_full_url(
+    url: &str,
+    query_params: Option<&HashMap<Cow<'_, str>, Cow<'_, str>>>,
+) -> String {
     match query_params {
         Some(query_params) => {
             let query_params_as_str = query_params
@@ -208,7 +238,7 @@ pub fn get_full_url(url: &str, query_params: &Option<HashMap<String, String>>) -
 pub fn format_query(
     action: &Action,
     computed_url: &str,
-    query_params: &Option<HashMap<String, String>>,
+    query_params: Option<&HashMap<Cow<'_, str>, Cow<'_, str>>>,
 ) -> String {
     format!(
         "{} {}",
