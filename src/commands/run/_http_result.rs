@@ -102,8 +102,8 @@ impl<'a> HttpResult<'a> {
     pub async fn handle_result(
         &mut self,
         action: &mut Action,
-        body: &Option<Cow<'a, str>>,
-        extract_pattern: &Option<HashMap<String, Option<String>>>,
+        body: Option<&Cow<'a, str>>,
+        extract_pattern: Option<&HashMap<&str, Option<&str>>>,
         ctx: &mut HashMap<String, String>,
         pb: &ProgressBar,
     ) -> anyhow::Result<()> {

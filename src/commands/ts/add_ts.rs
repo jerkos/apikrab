@@ -28,12 +28,11 @@ impl AddTestSuiteArgs {
 
         println!("Adding test suite {} to flow {}", self.name, self.flow_name);
 
-        let expected_clone = Some(self.expect.clone());
+        let expected_clone = Some(&self.expect);
 
-        let expected = serde_json::to_string::<HashMap<String, String>>(&parse_cli_conf_to_map(
-            &expected_clone,
-        ))
-        .expect("Error serializing conf");
+        let expected =
+            serde_json::to_string::<HashMap<_, _>>(&parse_cli_conf_to_map(expected_clone))
+                .expect("Error serializing conf");
 
         let test_suite_instance = TestSuiteInstance {
             test_suite_name: self.name.clone(),

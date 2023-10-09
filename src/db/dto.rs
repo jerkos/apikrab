@@ -54,7 +54,7 @@ impl Display for Project {
 
 impl From<&CreateProjectArgs> for Project {
     fn from(args: &CreateProjectArgs) -> Self {
-        let conf = parse_cli_conf_to_map(&args.conf);
+        let conf = parse_cli_conf_to_map(args.conf.as_ref());
         let conf_as_str = serde_json::to_string(&conf).expect("Error serializing conf");
         Project {
             name: args.name.clone(),
@@ -92,17 +92,17 @@ impl Action {
 
 impl From<&AddActionArgs> for Action {
     fn from(value: &AddActionArgs) -> Self {
-        let mut headers = parse_cli_conf_to_map(&value.header);
+        let mut headers = parse_cli_conf_to_map(value.header.as_ref());
         if value.url_encoded {
             headers.insert(
-                reqwest::header::CONTENT_TYPE.to_string(),
-                "application/x-www-form-urlencoded".to_string(),
+                reqwest::header::CONTENT_TYPE.as_ref(),
+                "application/x-www-form-urlencoded",
             );
         }
         if value.form_data {
             headers.insert(
-                reqwest::header::CONTENT_TYPE.to_string(),
-                "multipart/form-data".to_string(),
+                reqwest::header::CONTENT_TYPE.as_ref(),
+                "multipart/form-data",
             );
         }
 

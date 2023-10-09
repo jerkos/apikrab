@@ -165,11 +165,11 @@ impl RunActionArgs {
 
     /// Extract path interpolation
     /// Special cases that the name may or may not be present
-    pub fn get_xtracted_path(
-        &self,
-        extracted_path: &str,
+    pub fn get_xtracted_path<'a>(
+        &'a self,
+        extracted_path: &'a str,
         ctx: &HashMap<String, String>,
-    ) -> Option<HashMap<String, Option<String>>> {
+    ) -> Option<HashMap<&str, Option<&str>>> {
         match extracted_path {
             "" => None,
             _ => {
@@ -177,7 +177,7 @@ impl RunActionArgs {
 
                 let all_values = value
                     .values()
-                    .filter_map(|v| v.as_ref())
+                    .filter_map(|v| *v)
                     .map(|v| ctx.contains_key(v))
                     .collect::<Vec<_>>();
 
@@ -366,7 +366,7 @@ impl RunActionArgs {
                         // creating a progress bar for the current request
                         let pb = spinner(Some(&format!(
                             "Running {} ",
-                            format_query(&action, computed_url, &query_params)
+                            format_query(&action, computed_url, query_params.as_ref())
                         )));
                         pb.enable_steady_tick(Duration::from_millis(80));
 
@@ -380,8 +380,8 @@ impl RunActionArgs {
                                     computed_url,
                                     &action.verb,
                                     &computed_headers,
-                                    &query_params,
-                                    &body,
+                                    query_params.as_ref(),
+                                    body.as_ref(),
                                 )
                                 .await;
 
@@ -392,8 +392,8 @@ impl RunActionArgs {
                             let _ = result_handler
                                 .handle_result(
                                     &mut action,
-                                    &body,
-                                    &xtracted_path,
+                                    body.as_ref(),
+                                    xtracted_path.as_ref(),
                                     &mut extended_ctx,
                                     &pb,
                                 )
@@ -402,7 +402,7 @@ impl RunActionArgs {
                             pb.finish_with_message("Done 💫");
 
                             R {
-                                url: get_full_url(computed_url, &query_params),
+                                url: get_full_url(computed_url, query_params.as_ref()),
                                 result,
                                 ctx: extended_ctx,
                             }

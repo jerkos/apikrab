@@ -39,8 +39,8 @@ impl<'a> Api<'a> {
         &self,
         action_name: &str,
         url: &str,
-        headers: &HashMap<String, String>,
-        body: &Option<Cow<'a, str>>,
+        headers: &HashMap<Cow<'a, str>, Cow<'a, str>>,
+        body: Option<&Cow<'a, str>>,
         fetch_result: &FetchResult,
     ) -> anyhow::Result<()> {
         // insert history line !
@@ -67,9 +67,9 @@ impl<'a> Api<'a> {
         action_name: &str,
         url: &str,
         verb: &str,
-        headers: &HashMap<String, String>,
-        query_params: &Option<HashMap<String, String>>,
-        body: &Option<Cow<'a, str>>,
+        headers: &HashMap<Cow<'a, str>, Cow<'a, str>>,
+        query_params: Option<&HashMap<Cow<'a, str>, Cow<'a, str>>>,
+        body: Option<&Cow<'a, str>>,
     ) -> anyhow::Result<FetchResult> {
         // building request
         let mut builder = match verb {
@@ -98,9 +98,9 @@ impl<'a> Api<'a> {
 
         // body
         let content_type = headers
-            .get(reqwest::header::CONTENT_TYPE.as_str())
-            .map(String::as_str)
-            .unwrap_or(APPLICATION_JSON);
+            .get::<str>(reqwest::header::CONTENT_TYPE.as_ref())
+            .cloned()
+            .unwrap_or(Cow::Borrowed(APPLICATION_JSON));
         let is_url_encoded = content_type == URL_ENCODED;
         let is_form_data = content_type == FORM_DATA;
 
