@@ -35,6 +35,7 @@ impl Api {
         }
     }
 
+
     #[allow(clippy::too_many_arguments)]
     pub async fn fetch(
         &self,
