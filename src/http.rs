@@ -7,9 +7,6 @@ use std::time::{Duration, Instant};
 use reqwest::multipart::{Form, Part};
 use reqwest::Method;
 
-use crate::db::db_handler::DBHandler;
-use crate::db::dto::History;
-
 #[derive(Debug, Clone)]
 pub struct FetchResult {
     pub response: String,
@@ -17,59 +14,35 @@ pub struct FetchResult {
     pub duration: Duration,
 }
 
+impl FetchResult {
+    pub fn is_success(&self) -> bool {
+        self.status >= 200 && self.status < 300
+    }
+}
+
 static URL_ENCODED: &str = "application/x-www-form-urlencoded";
 static FORM_DATA: &str = "multipart/form-data";
 static APPLICATION_JSON: &str = "application/json";
 
-pub struct Api<'a> {
+pub struct Api {
     pub(crate) client: reqwest::Client,
-    pub db_handler: &'a DBHandler,
 }
 
-impl<'a> Api<'a> {
-    pub fn new(db_handler: &'a DBHandler) -> Self {
+impl Api {
+    pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
-            db_handler,
         }
-    }
-
-    /// insert history line
-    pub async fn save_history_line(
-        &self,
-        action_name: &str,
-        url: &str,
-        headers: &HashMap<String, String>,
-        body: Option<&Cow<'a, str>>,
-        fetch_result: &FetchResult,
-    ) -> anyhow::Result<()> {
-        // insert history line !
-        self.db_handler
-            .insert_history(&History {
-                id: None,
-                action_name: action_name.to_string(),
-                url: url.to_string(),
-                body: body.as_ref().map(|s| s.to_string()),
-                headers: Some(serde_json::to_string(headers)?),
-                response: Some(fetch_result.response.clone()),
-                status_code: fetch_result.status,
-                duration: fetch_result.duration.as_secs_f32(),
-                timestamp: None,
-            })
-            .await?;
-
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn fetch(
         &self,
-        action_name: &str,
         url: &str,
         verb: &str,
         headers: &HashMap<String, String>,
         query_params: Option<&HashMap<String, String>>,
-        body: Option<&Cow<'a, str>>,
+        body: Option<&Cow<'_, str>>,
     ) -> anyhow::Result<FetchResult> {
         // building request
         let mut builder = match verb {
@@ -148,9 +121,6 @@ impl<'a> Api<'a> {
             status: status.as_u16(),
             duration,
         };
-        // insert history line
-        self.save_history_line(action_name, url, headers, body, &fetch_result)
-            .await?;
 
         // return results
         Ok(fetch_result)

@@ -27,12 +27,11 @@ pub fn json_path(json_str: &str, search: &str) -> Option<serde_json::Value> {
             } else {
                 (Some(json), token)
             };
-
             match corrected_json {
                 Some(json) => match json {
                     serde_json::Value::Object(map) => map.get(corrected_token),
                     serde_json::Value::Array(array) => {
-                        array.get(corrected_token.parse::<usize>().unwrap())
+                        array.get(corrected_token.parse::<usize>().ok()?)
                     }
                     _ => None,
                 },

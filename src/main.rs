@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     db_handler.init_db().await?;
 
     // init http requester
-    let requester = http::Api::new(&db_handler);
+    let requester = http::Api::new();
 
     // parse cli args
     let mut cli: Cli = Cli::parse();
@@ -90,13 +90,15 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::Run(run) => match &mut run.run_commands {
             RunCommands::Action(run_action_args) => {
-                run_action_args.run_action(&requester).await?;
+                run_action_args.run_action(&requester, &db_handler).await?;
             }
             RunCommands::Flow(run_flow_args) => {
                 run_flow_args.run_flow(&db_handler, &requester).await?;
             }
             RunCommands::TestSuite(test_suite_args) => {
-                test_suite_args.run_test_suite(&requester).await?;
+                test_suite_args
+                    .run_test_suite(&requester, &db_handler)
+                    .await?;
             }
         },
         Commands::Flow(flow) => match &mut flow.flow_commands {

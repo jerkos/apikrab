@@ -113,7 +113,6 @@ impl DBHandler {
             .bind(project_name)
             .fetch_optional(self.get_conn())
             .await?;
-
         project_opt.ok_or(anyhow::anyhow!(PROJECT_NOT_FOUND.red()))
     }
 
