@@ -1,29 +1,20 @@
 use crate::commands::run::_printer::Printer;
-use crate::db::db_handler::DBHandler;
-use crate::db::dto::{Action, Context};
 use crate::http::FetchResult;
 use crate::json_path;
 use colored::Colorize;
 use crossterm::style::Stylize;
 use indicatif::ProgressBar;
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Print response and extracted values
 pub struct HttpResult<'a> {
-    pub(crate) db_handler: &'a DBHandler,
     pub(crate) fetch_result: &'a anyhow::Result<FetchResult>,
     pub(crate) printer: &'a mut Printer,
 }
 
 impl<'a> HttpResult<'a> {
-    pub fn new(
-        db_handler: &'a DBHandler,
-        fetch_result: &'a anyhow::Result<FetchResult>,
-        printer: &'a mut Printer,
-    ) -> Self {
+    pub fn new(fetch_result: &'a anyhow::Result<FetchResult>, printer: &'a mut Printer) -> Self {
         Self {
-            db_handler,
             fetch_result,
             printer,
         }
@@ -49,9 +40,15 @@ impl<'a> HttpResult<'a> {
                 }
                 Err(_) => "".to_owned(),
             })
-            .unwrap();
+            .unwrap_or("".to_owned());
 
         if extracted_as_string.is_empty() {
+            pb.suspend(|| {
+                println!(
+                    " ⚠️No value extracted for pattern {}",
+                    pattern_to_extract.bright_green()
+                )
+            });
             return None;
         }
 
@@ -99,20 +96,14 @@ impl<'a> HttpResult<'a> {
         Ok(())
     }
 
-    pub async fn handle_result(
+    pub fn handle_result(
         &mut self,
-        action: &mut Action,
-        body: Option<&Cow<'a, str>>,
         extract_pattern: Option<&HashMap<&str, Option<&str>>>,
         ctx: &mut HashMap<String, String>,
         pb: &ProgressBar,
     ) -> anyhow::Result<()> {
         match self.fetch_result {
             Ok(FetchResult { response, .. }) => {
-                action.response_example = Some(response.clone());
-                action.body_example = body.as_ref().map(|b| b.to_string());
-                self.db_handler.upsert_action(action, true).await?;
-
                 match extract_pattern {
                     Some(pattern) => {
                         // qualify extract
@@ -136,13 +127,6 @@ impl<'a> HttpResult<'a> {
                         self.printer.maybe_to_clip(&concat_pattern);
                         self.printer
                             .p_response(|| pb.suspend(|| println!("{}", concat_pattern)));
-
-                        self.db_handler
-                            .insert_conf(&Context {
-                                value: serde_json::to_string(&ctx)
-                                    .expect("Error serializing context"),
-                            })
-                            .await?;
                     }
                     None => self.print_response(response, pb)?,
                 }

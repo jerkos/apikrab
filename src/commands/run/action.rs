@@ -1,17 +1,17 @@
 use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
-use crate::db::dto::Action;
-use crate::http;
+use crate::db::dto::{Action, Context, History};
 use crate::http::FetchResult;
 use crate::utils::{
     format_query, get_full_url, get_str_as_interpolated_map, parse_multiple_conf,
     parse_multiple_conf_as_opt_with_grouping_and_interpolation, parse_multiple_conf_with_opt,
-    replace_with_conf, spinner,
+    replace_with_conf,
 };
+use crate::{db, http};
 use clap::Args;
 use crossterm::style::Stylize;
 use futures::future;
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -267,70 +267,47 @@ impl RunActionArgs {
         Ok(())
     }
 
-    fn summary(&self, action_results: &[R], pb: &ProgressBar) {
-        // create printer
-        let main_printer = Printer::new(self.quiet, self.clipboard, self.grep);
-        // print results
-        main_printer.p_info(|| {
-            pb.println(format!("\n\n{}\n", "RESULTS SUMMARY:".bold()));
-            action_results
-                .iter()
-                .group_by(|r| r.result.as_ref().map(|obj| obj.status).unwrap_or(500))
-                .into_iter()
-                .for_each(|(k, v)| {
-                    //let results = v.collect::<Vec<&R>>();
-                    let format = format!("Requests with status {}", k);
-                    if (200..300).contains(&k) {
-                        pb.println(format!("{}", format.bold().green()));
-                    } else if (300..400).contains(&k) {
-                        pb.println(format!("{}", format.bold().cyan()));
-                    } else {
-                        pb.println(format!("{}", format.bold().red()));
-                    }
-                    v.for_each(|r| pb.println(format!("\t{}", r.url)));
-                })
-        });
-    }
-
     /// Main function for running an action
-    pub async fn run_action<'a>(&'a mut self, http: &'a http::Api<'_>) -> anyhow::Result<Vec<R>> {
+    pub async fn run_action<'a>(
+        &'a mut self,
+        http: &'a http::Api,
+        db: &'a db::db_handler::DBHandler,
+    ) -> anyhow::Result<Vec<R>> {
         let cloned = self.clone();
         // creating a new context hashmap for storing extracted values
-        let ctx: HashMap<String, String> = match http.db_handler.get_conf().await {
+        let ctx: HashMap<String, String> = match db.get_conf().await {
             Ok(ctx) => ctx.get_value(),
             Err(..) => HashMap::new(),
         };
         // check if action is chained
-        let is_chained_action = self.chain.is_some();
-
-        // prepare all data
-        self.prepare(is_chained_action)?;
+        self.prepare(self.chain.is_some())?;
 
         // run all actions given data
         let zipped = itertools::izip!(
-            self.chain.as_ref().expect("Intern error").iter(),
-            self.body.as_ref().expect("Intern error").iter(),
-            self.extract_path.as_ref().expect("Intern error").iter(),
-            self.path_params.as_ref().expect("Intern error").iter(),
-            self.query_params.as_ref().expect("Intern error").iter(),
+            self.chain.as_ref().expect("Internal error").iter(),
+            self.body.as_ref().expect("Internal error").iter(),
+            self.extract_path.as_ref().expect("Internal error").iter(),
+            self.path_params.as_ref().expect("Internal error").iter(),
+            self.query_params.as_ref().expect("Internal error").iter(),
         );
 
         // create a vector of results
         let mut action_results: Vec<R> = vec![];
 
-        let p = ProgressBar::new(zipped.len() as u64);
-        p.set_style(
-            indicatif::ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}")
-                .unwrap(),
-        );
-        p.enable_steady_tick(Duration::from_millis(80));
+        let multi_bar = indicatif::MultiProgress::new();
+        let sty = indicatif::ProgressStyle::default_bar()
+            .template("{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap();
+        let main_pb = multi_bar.add(ProgressBar::new(zipped.len() as u64).with_style(sty.clone()));
+        main_pb.enable_steady_tick(Duration::from_millis(100));
 
         for (action_name, action_body, xtract_path, path_params, query_params) in zipped {
             // retrieve some information in the database
-            let action = http.db_handler.get_action(action_name).await?;
-            let project = http.db_handler.get_project(&action.project_name).await?;
+            let action = db.get_action(action_name).await?;
+            let project = db.get_project(&action.project_name).await?;
+
             let mut xtended_ctx = project.get_conf();
+
             // update the configuration
             xtended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
 
@@ -346,13 +323,13 @@ impl RunActionArgs {
                 query_params,
                 &xtended_ctx,
             );
-
             // run in concurrent mode
             let fetch_results = future::join_all(
                 computed_urls
                     .iter()
                     .cartesian_product(computed_query_params)
                     .map(|(computed_url, query_params)| {
+                        // main_pb.println("hello8");
                         let body = self.get_body(action_body, &action, &xtended_ctx);
                         let xtracted_path = self.get_xtracted_path(xtract_path, &xtended_ctx);
 
@@ -364,19 +341,27 @@ impl RunActionArgs {
                         let mut action = action.clone();
 
                         // creating a progress bar for the current request
-                        let pb = spinner(Some(&format!(
-                            "Running {} ",
-                            format_query(&action, computed_url, query_params.as_ref())
-                        )));
-                        pb.enable_steady_tick(Duration::from_millis(80));
+                        let pb = multi_bar.add(
+                            ProgressBar::new_spinner()
+                                .with_style(
+                                    ProgressStyle::with_template("{spinner:.blue} {msg}")
+                                        .unwrap()
+                                        .tick_strings(&["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]),
+                                )
+                                .with_message(format!(
+                                    "Running {} ",
+                                    format_query(&action, computed_url, query_params.as_ref())
+                                )),
+                        );
+                        pb.enable_steady_tick(Duration::from_millis(100));
 
+                        // create printer (not movable)
                         let mut printer = Printer::new(self.quiet, self.clipboard, self.grep);
 
-                        // run in concurrent mode
                         async move {
-                            let result = http
+                            // fetch api
+                            let fetch_result = http
                                 .fetch(
-                                    action_name,
                                     computed_url,
                                     &action.verb,
                                     &computed_headers,
@@ -385,25 +370,81 @@ impl RunActionArgs {
                                 )
                                 .await;
 
-                            let mut result_handler =
-                                HttpResult::new(http.db_handler, &result, &mut printer);
-
-                            // handle result
-                            let _ = result_handler
-                                .handle_result(
-                                    &mut action,
-                                    body.as_ref(),
-                                    xtracted_path.as_ref(),
-                                    &mut extended_ctx,
-                                    &pb,
-                                )
+                            // save history line
+                            let fetch_result_ref = fetch_result.as_ref();
+                            let _ = db
+                                .insert_history(&History {
+                                    id: None,
+                                    action_name: action_name.to_string(),
+                                    url: computed_url.to_string(),
+                                    body: body.as_ref().map(|s| s.to_string()),
+                                    headers: Some(
+                                        serde_json::to_string(&computed_headers).unwrap(),
+                                    ),
+                                    response: fetch_result_ref.map(|r| r.response.clone()).ok(),
+                                    status_code: fetch_result_ref.map(|r| r.status).unwrap_or(0u16),
+                                    duration: fetch_result_ref
+                                        .map(|r| r.duration.as_secs_f32())
+                                        .unwrap_or(0f32),
+                                    timestamp: None,
+                                })
                                 .await;
 
-                            pb.finish_with_message("Done 💫");
+                            // upsert action if success
+                            if let Ok(FetchResult {
+                                response, status, ..
+                            }) = &fetch_result
+                            {
+                                if *status >= 200 && *status < 300 {
+                                    action.response_example = Some(response.clone());
+                                    action.body_example = body.as_ref().map(|b| b.to_string());
 
+                                    if db.upsert_action(&action, true).await.is_err() {
+                                        pb.println("Error inserting action");
+                                    }
+                                }
+                            }
+
+                            // upsert ctx
+                            if db
+                                .insert_conf(&Context {
+                                    value: serde_json::to_string(&extended_ctx)
+                                        .expect("Error serializing context"),
+                                })
+                                .await
+                                .is_err()
+                            {
+                                pb.println("Error inserting context");
+                            }
+
+                            // handle result and print extracted data
+                            let _ = HttpResult::new(&fetch_result, &mut printer).handle_result(
+                                xtracted_path.as_ref(),
+                                &mut extended_ctx,
+                                &pb,
+                            );
+
+                            // finish current pb
+                            pb.finish_with_message(format!(
+                                "{}  {}",
+                                fetch_result
+                                    .as_ref()
+                                    .map(|r| {
+                                        let s = r.status.to_string();
+                                        if r.is_success() {
+                                            format!("{} ✅", s.green())
+                                        } else {
+                                            format!("{} ❌", s.red())
+                                        }
+                                    })
+                                    .unwrap_or("".to_string()),
+                                format_query(&action, computed_url, query_params.as_ref())
+                            ));
+
+                            // returning mixed of result etc...
                             R {
                                 url: get_full_url(computed_url, query_params.as_ref()),
-                                result,
+                                result: fetch_result,
                                 ctx: extended_ctx,
                             }
                         }
@@ -416,20 +457,22 @@ impl RunActionArgs {
             }
 
             // increment the main progress bar
-            p.inc(1);
+            main_pb.inc(1);
         }
 
         // save as requested
         if self.save_as.is_some() {
-            http.db_handler
-                .upsert_flow(self.save_as.as_ref().unwrap(), &cloned, self.quiet)
+            db.upsert_flow(self.save_as.as_ref().unwrap(), &cloned, self.quiet)
                 .await?;
         }
 
         // finishing progress bar
-        p.finish_with_message("All done 💫");
-        // finally print results
-        self.summary(&action_results, &p);
+        main_pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {msg}")
+                .unwrap(),
+        );
+        main_pb.finish_with_message(format!("{}", "Finished !".bold()));
 
         Ok(action_results)
     }
