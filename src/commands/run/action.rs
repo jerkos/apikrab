@@ -295,24 +295,33 @@ impl RunActionArgs {
         let mut action_results: Vec<R> = vec![];
 
         let multi_bar = indicatif::MultiProgress::new();
-        let sty = indicatif::ProgressStyle::default_bar()
+        let sty = ProgressStyle::default_bar()
             .template("{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
             .unwrap();
         let main_pb = multi_bar.add(ProgressBar::new(zipped.len() as u64).with_style(sty.clone()));
         main_pb.enable_steady_tick(Duration::from_millis(100));
 
+        // create printer to print results
+        let mut printer = Printer::new(self.quiet, self.clipboard, self.grep);
+
         for (action_name, action_body, xtract_path, path_params, query_params) in zipped {
             // retrieve some information in the database
             let action = db.get_action(action_name).await?;
             let project = db.get_project(&action.project_name).await?;
-
             let mut xtended_ctx = project.get_conf();
-
             // update the configuration
             xtended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
 
             // retrieve test url
             let test_url = project.test_url.as_ref().expect("Unknown URL");
+
+            // compute body
+            let body = self.get_body(action_body, &action, &xtended_ctx);
+
+            // compute headers
+            let computed_headers =
+                get_str_as_interpolated_map(&action.headers, &xtended_ctx)
+                    .unwrap_or(HashMap::new());
 
             // all possible urls
             let computed_urls =
@@ -323,22 +332,19 @@ impl RunActionArgs {
                 query_params,
                 &xtended_ctx,
             );
+
             // run in concurrent mode
             let fetch_results = future::join_all(
                 computed_urls
                     .iter()
                     .cartesian_product(computed_query_params)
                     .map(|(computed_url, query_params)| {
-                        // main_pb.println("hello8");
-                        let body = self.get_body(action_body, &action, &xtended_ctx);
-                        let xtracted_path = self.get_xtracted_path(xtract_path, &xtended_ctx);
 
-                        let computed_headers =
-                            get_str_as_interpolated_map(&action.headers, &xtended_ctx)
-                                .unwrap_or(HashMap::new());
-
-                        let mut extended_ctx = xtended_ctx.clone();
+                        // clone needed variables
+                        let extended_ctx = xtended_ctx.clone();
                         let mut action = action.clone();
+                        let computed_headers = computed_headers.clone();
+                        let body = body.clone();
 
                         // creating a progress bar for the current request
                         let pb = multi_bar.add(
@@ -354,9 +360,6 @@ impl RunActionArgs {
                                 )),
                         );
                         pb.enable_steady_tick(Duration::from_millis(100));
-
-                        // create printer (not movable)
-                        let mut printer = Printer::new(self.quiet, self.clipboard, self.grep);
 
                         async move {
                             // fetch api
@@ -392,8 +395,8 @@ impl RunActionArgs {
 
                             // upsert action if success
                             if let Ok(FetchResult {
-                                response, status, ..
-                            }) = &fetch_result
+                                          response, status, ..
+                                      }) = &fetch_result
                             {
                                 if *status >= 200 && *status < 300 {
                                     action.response_example = Some(response.clone());
@@ -416,13 +419,6 @@ impl RunActionArgs {
                             {
                                 pb.println("Error inserting context");
                             }
-
-                            // handle result and print extracted data
-                            let _ = HttpResult::new(&fetch_result, &mut printer).handle_result(
-                                xtracted_path.as_ref(),
-                                &mut extended_ctx,
-                                &pb,
-                            );
 
                             // finish current pb
                             pb.finish_with_message(format!(
@@ -450,9 +446,17 @@ impl RunActionArgs {
                         }
                     }),
             )
-            .await;
+                .await;
+
+            let xtracted_path = self.get_xtracted_path(xtract_path, &xtended_ctx);
 
             for action_result in fetch_results {
+                // handle result and print extracted data
+                let _ = HttpResult::new(&action_result.result, &mut printer).handle_result(
+                    xtracted_path.as_ref(),
+                    &mut xtended_ctx,
+                    &main_pb,
+                );
                 action_results.push(action_result);
             }
 

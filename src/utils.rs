@@ -70,8 +70,8 @@ pub fn parse_multiple_conf_with_opt<'a>(conf: &'a str) -> HashMap<&'a str, Optio
     _parse_multiple_conf(conf, closure)
 }
 
-pub fn get_str_as_interpolated_map<'a>(
-    data: &'a str,
+pub fn get_str_as_interpolated_map(
+    data: &str,
     ctx: &HashMap<String, String>,
 ) -> Option<HashMap<String, String>> {
     if data.is_empty() {
