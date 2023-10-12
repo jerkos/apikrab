@@ -1,4 +1,3 @@
-use crate::db::dto::Action;
 use crossterm::style::Stylize;
 use itertools::Itertools;
 use rand::*;
@@ -172,13 +171,13 @@ pub fn get_full_url(url: &str, query_params: Option<&HashMap<String, String>>) -
 
 /// Format a query given an action, an url and query params
 pub fn format_query(
-    action: &Action,
+    verb: &str,
     computed_url: &str,
     query_params: Option<&HashMap<String, String>>,
 ) -> String {
     format!(
         "{} {}",
-        action.verb.clone().yellow(),
+        verb.yellow(),
         get_full_url(computed_url, query_params).green()
     )
 }

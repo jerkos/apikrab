@@ -24,7 +24,7 @@ pub struct AddActionArgs {
     pub static_body: Option<String>,
 
     /// adding header separated by a :
-    #[arg(long)]
+    #[arg(short = 'H', long)]
     pub header: Option<Vec<String>>,
 
     /// shortcut to add a form encoded header

@@ -201,7 +201,7 @@ impl Display for Flow {
             .iter()
             .map(|a| a.to_string())
             .collect::<Vec<String>>();
-        chain.insert(0, action);
+        chain.insert(0, action.unwrap_or("UKN".to_string()));
 
         let extracted = ac.extract_path.unwrap_or(vec![]);
 

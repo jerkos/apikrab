@@ -1,21 +1,24 @@
 use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
-use crate::db::dto::{Action, Context, History};
+use crate::commands::run::_run_helper::{
+    check_input, get_body, get_computed_urls, get_xtracted_path, is_anonymous_action,
+};
+use crate::db::db_handler::DBHandler;
+use crate::db::dto::{Action, Context, History, Project};
+use crate::http;
 use crate::http::FetchResult;
 use crate::utils::{
-    format_query, get_full_url, get_str_as_interpolated_map, parse_multiple_conf,
-    parse_multiple_conf_as_opt_with_grouping_and_interpolation, parse_multiple_conf_with_opt,
-    replace_with_conf,
+    format_query, get_full_url, get_str_as_interpolated_map,
+    parse_multiple_conf_as_opt_with_grouping_and_interpolation,
 };
-use crate::{db, http};
+use anyhow::Error;
 use clap::Args;
 use crossterm::style::Stylize;
 use futures::future;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub struct R {
@@ -24,28 +27,16 @@ pub struct R {
     pub ctx: HashMap<String, String>,
 }
 
-pub enum BodyType<'bt> {
-    Static(&'bt str),
-    LastSuccessfulBody(&'bt str),
-    Empty,
-    Default(&'bt str),
-}
-
-impl<'bt> From<&'bt str> for BodyType<'bt> {
-    fn from(s: &'bt str) -> BodyType<'bt> {
-        match s {
-            "" => BodyType::Empty,
-            "LAST_SUCCESSFUL_BODY" => BodyType::LastSuccessfulBody(s),
-            "STATIC" => BodyType::Static(s),
-            _ => BodyType::Default(s),
-        }
-    }
-}
-
 #[derive(Args, Serialize, Deserialize, Debug, Clone)]
 pub struct RunActionArgs {
     /// action name
-    pub(crate) name: String,
+    pub(crate) name: Option<String>,
+
+    #[arg(short, long, value_parser = ["GET", "POST", "PUT", "DELETE"])]
+    pub(crate) verb: Option<String>,
+
+    #[arg(short, long)]
+    pub(crate) url: Option<String>,
 
     /// path params separated by a ,
     #[arg(short, long)]
@@ -91,106 +82,70 @@ pub struct RunActionArgs {
 }
 
 impl RunActionArgs {
-    fn _get_body<'a>(
-        str: &str,
-        interpolated_body: Cow<'a, str>,
-        body: &str,
-    ) -> Option<Cow<'a, str>> {
-        if str.contains('{') {
-            return Some(interpolated_body);
-        }
-        let body_as_map = parse_multiple_conf(body);
-        Some(Cow::Owned(
-            serde_json::to_string(&body_as_map).ok().unwrap(),
-        ))
+    fn init_progress_bars(step_count: u64) -> (MultiProgress, ProgressBar) {
+        // init a multi bar to show progress
+        let multi_bar = MultiProgress::new();
+
+        let main_pb = multi_bar.add(
+            ProgressBar::new(step_count).with_style(
+                ProgressStyle::default_bar()
+                    .template(
+                        "{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                    )
+                    .unwrap(),
+            ),
+        );
+        main_pb.enable_steady_tick(Duration::from_millis(100));
+
+        (multi_bar, main_pb)
     }
 
-    /// Body interpolation
-    /// Some magical values exists e.g.
-    /// LAST_SUCCESSFUL_BODY
-    pub fn get_body<'a>(
-        &self,
-        body: &'a str,
-        action: &'a Action,
-        ctx: &HashMap<String, String>,
-    ) -> Option<Cow<'a, str>> {
-        let interpolated_body = replace_with_conf(body, ctx);
-
-        match &interpolated_body {
-            // if static body exists, use it otherwise None is used
-            Cow::Borrowed(str) => {
-                let body_type: BodyType = (*str).into();
-                match body_type {
-                    BodyType::Empty => None,
-                    BodyType::Static(_) => {
-                        Some(Cow::Borrowed(action.static_body.as_ref()?.as_str()))
-                    }
-                    BodyType::LastSuccessfulBody(_) => {
-                        Some(Cow::Borrowed(action.body_example.as_ref()?.as_str()))
-                    }
-                    BodyType::Default(str) => Self::_get_body(str, interpolated_body.clone(), body),
-                }
-            }
-            // body had some interpolated value
-            Cow::Owned(body_value) => Self::_get_body(body_value, interpolated_body.clone(), body),
-        }
+    fn add_progress_bar_for_request(
+        multi_bar: &MultiProgress,
+        action_verb: &str,
+        computed_url: &str,
+        query_params: Option<&HashMap<String, String>>,
+    ) -> ProgressBar {
+        // creating a progress bar for the current request
+        let pb = multi_bar.add(
+            ProgressBar::new_spinner()
+                .with_style(
+                    ProgressStyle::with_template("{spinner:.blue} {msg}")
+                        .unwrap()
+                        .tick_strings(&["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]),
+                )
+                .with_message(format!(
+                    "Running {} ",
+                    format_query(action_verb, computed_url, query_params)
+                )),
+        );
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
     }
 
-    /// Compute several url given path params
-    /// using the cartesian product of all values
-    /// te generate all possible urls
-    pub fn get_computed_urls(
-        path_params: &str,
-        project_url: &str,
-        action_url: &str,
-        ctx: &HashMap<String, String>,
-    ) -> HashSet<String> {
-        let all_path_params =
-            parse_multiple_conf_as_opt_with_grouping_and_interpolation(path_params, ctx);
-        let full_url = format!("{}/{}", project_url, action_url);
-
-        all_path_params
-            .iter()
-            .map(|params| {
-                let mut url = full_url.clone();
-                if let Some(params) = params {
-                    for (k, v) in params.iter() {
-                        url = url.replace(format!("{{{}}}", k).as_str(), v);
+    /// finish progress bar
+    pub fn finish_progress_bar(
+        pb: &ProgressBar,
+        fetch_result: Result<&FetchResult, &Error>,
+        action_verb: &str,
+        computed_url: &str,
+        query_params: Option<&HashMap<String, String>>,
+    ) {
+        pb.finish_with_message(format!(
+            "{}  {}",
+            fetch_result
+                .as_ref()
+                .map(|r| {
+                    let s = r.status.to_string();
+                    if r.is_success() {
+                        format!("{} ✅", s.green())
+                    } else {
+                        format!("{} ❌", s.red())
                     }
-                }
-                url
-            })
-            .collect()
-    }
-
-    /// Extract path interpolation
-    /// Special cases that the name may or may not be present
-    pub fn get_xtracted_path<'a>(
-        &'a self,
-        extracted_path: &'a str,
-        ctx: &HashMap<String, String>,
-    ) -> Option<HashMap<&str, Option<&str>>> {
-        match extracted_path {
-            "" => None,
-            _ => {
-                let value = parse_multiple_conf_with_opt(extracted_path);
-
-                let all_values = value
-                    .values()
-                    .filter_map(|v| *v)
-                    .map(|v| ctx.contains_key(v))
-                    .collect::<Vec<_>>();
-
-                let needs_to_continue = all_values.iter().all(|v| *v);
-                if !all_values.is_empty() && needs_to_continue && !self.force {
-                    println!(
-                        "Some extracted values already in ctx. Skipping ! \n Use force to rerun"
-                    );
-                    return None;
-                }
-                Some(value)
-            }
-        }
+                })
+                .unwrap_or("".to_string()),
+            format_query(action_verb, computed_url, query_params)
+        ));
     }
 
     ///
@@ -250,7 +205,13 @@ impl RunActionArgs {
             .collect::<HashMap<_, _>>();
 
         let chain = unwrapped_data.get_mut(&"chain").unwrap();
-        chain.insert(0, self.name.to_string());
+        chain.insert(
+            0,
+            self.name
+                .as_ref()
+                .map(|n| n.to_string())
+                .unwrap_or("UNKNOWN".to_string()),
+        );
 
         // check for chain action we do have same length for parameters
         if chain_len > 0 {
@@ -267,13 +228,36 @@ impl RunActionArgs {
         Ok(())
     }
 
+    async fn from_db(action_name: &str, db: &DBHandler) -> (Option<Action>, Option<Project>) {
+        if is_anonymous_action(action_name) {
+            (None, None)
+        } else {
+            let action = db.get_action(action_name).await.ok();
+            let project_name = action
+                .as_ref()
+                .map(|a| a.project_name.as_str())
+                .expect("Unknown project");
+
+            let project = db.get_project(project_name).await.ok();
+            (action, project)
+        }
+    }
+
     /// Main function for running an action
     pub async fn run_action<'a>(
         &'a mut self,
         http: &'a http::Api,
-        db: &'a db::db_handler::DBHandler,
+        db: &'a DBHandler,
     ) -> anyhow::Result<Vec<R>> {
-        let cloned = self.clone();
+        if let Err(msg) = check_input(
+            self.name.as_deref(),
+            self.verb.as_deref(),
+            self.url.as_deref(),
+        ) {
+            eprintln!("{}", msg);
+            anyhow::bail!("Invalid input");
+        }
+
         // creating a new context hashmap for storing extracted values
         let ctx: HashMap<String, String> = match db.get_conf().await {
             Ok(ctx) => ctx.get_value(),
@@ -282,50 +266,58 @@ impl RunActionArgs {
         // check if action is chained
         self.prepare(self.chain.is_some())?;
 
-        // run all actions given data
-        let zipped = itertools::izip!(
+        let (multi_bar, main_pb) =
+            Self::init_progress_bars(self.chain.as_ref().map(|c| c.len()).unwrap() as u64);
+
+        // create printer to print results
+        let mut printer = Printer::new(self.quiet, self.clipboard, self.grep);
+
+        // create a vector of results
+        let mut action_results: Vec<R> = vec![];
+
+        for (action_name, action_body, xtract_path, path_params, query_params) in itertools::izip!(
             self.chain.as_ref().expect("Internal error").iter(),
             self.body.as_ref().expect("Internal error").iter(),
             self.extract_path.as_ref().expect("Internal error").iter(),
             self.path_params.as_ref().expect("Internal error").iter(),
             self.query_params.as_ref().expect("Internal error").iter(),
-        );
-
-        // create a vector of results
-        let mut action_results: Vec<R> = vec![];
-
-        let multi_bar = indicatif::MultiProgress::new();
-        let sty = ProgressStyle::default_bar()
-            .template("{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .unwrap();
-        let main_pb = multi_bar.add(ProgressBar::new(zipped.len() as u64).with_style(sty.clone()));
-        main_pb.enable_steady_tick(Duration::from_millis(100));
-
-        // create printer to print results
-        let mut printer = Printer::new(self.quiet, self.clipboard, self.grep);
-
-        for (action_name, action_body, xtract_path, path_params, query_params) in zipped {
+        ) {
             // retrieve some information in the database
-            let action = db.get_action(action_name).await?;
-            let project = db.get_project(&action.project_name).await?;
-            let mut xtended_ctx = project.get_conf();
+            let (action, project) = Self::from_db(action_name, db).await;
+
+            // deals with configuration
+            let mut xtended_ctx = project
+                .as_ref()
+                .map(|p| p.get_conf())
+                .unwrap_or(HashMap::new());
             // update the configuration
-            xtended_ctx.extend(ctx.iter().map(|(k, v)| (k.clone(), v.clone())));
+            xtended_ctx.extend(ctx.clone().into_iter());
 
             // retrieve test url
-            let test_url = project.test_url.as_ref().expect("Unknown URL");
-
-            // compute body
-            let body = self.get_body(action_body, &action, &xtended_ctx);
-
-            // compute headers
-            let computed_headers =
-                get_str_as_interpolated_map(&action.headers, &xtended_ctx)
-                    .unwrap_or(HashMap::new());
+            let main_project_url = project.as_ref().and_then(|p| p.test_url.as_deref());
 
             // all possible urls
+            let action_url = action
+                .as_ref()
+                .map(|a| a.url.as_str())
+                .unwrap_or_else(|| self.url.as_ref().unwrap());
             let computed_urls =
-                Self::get_computed_urls(path_params, test_url.as_str(), &action.url, &xtended_ctx);
+                get_computed_urls(path_params, main_project_url, action_url, &xtended_ctx);
+
+            // compute body
+            let body = get_body(
+                action_body,
+                action.as_ref().and_then(|a| a.static_body.as_deref()),
+                action.as_ref().and_then(|a| a.body_example.as_deref()),
+                &xtended_ctx,
+            );
+
+            // compute headers
+            let computed_headers = get_str_as_interpolated_map(
+                action.as_ref().map(|a| a.headers.as_str()).unwrap_or("{}"),
+                &xtended_ctx,
+            )
+            .unwrap_or(HashMap::new());
 
             // all possible query params
             let computed_query_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(
@@ -339,34 +331,30 @@ impl RunActionArgs {
                     .iter()
                     .cartesian_product(computed_query_params)
                     .map(|(computed_url, query_params)| {
-
                         // clone needed variables
                         let extended_ctx = xtended_ctx.clone();
                         let mut action = action.clone();
                         let computed_headers = computed_headers.clone();
                         let body = body.clone();
 
+                        let action_verb = action
+                            .as_ref()
+                            .map(|a| a.verb.clone())
+                            .unwrap_or_else(|| self.verb.clone().unwrap());
                         // creating a progress bar for the current request
-                        let pb = multi_bar.add(
-                            ProgressBar::new_spinner()
-                                .with_style(
-                                    ProgressStyle::with_template("{spinner:.blue} {msg}")
-                                        .unwrap()
-                                        .tick_strings(&["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]),
-                                )
-                                .with_message(format!(
-                                    "Running {} ",
-                                    format_query(&action, computed_url, query_params.as_ref())
-                                )),
+                        let pb = Self::add_progress_bar_for_request(
+                            &multi_bar,
+                            &action_verb,
+                            computed_url,
+                            query_params.as_ref(),
                         );
-                        pb.enable_steady_tick(Duration::from_millis(100));
 
                         async move {
                             // fetch api
                             let fetch_result = http
                                 .fetch(
                                     computed_url,
-                                    &action.verb,
+                                    &action_verb,
                                     &computed_headers,
                                     query_params.as_ref(),
                                     body.as_ref(),
@@ -395,15 +383,17 @@ impl RunActionArgs {
 
                             // upsert action if success
                             if let Ok(FetchResult {
-                                          response, status, ..
-                                      }) = &fetch_result
+                                response, status, ..
+                            }) = &fetch_result
                             {
-                                if *status >= 200 && *status < 300 {
-                                    action.response_example = Some(response.clone());
-                                    action.body_example = body.as_ref().map(|b| b.to_string());
+                                if let Some(action) = action.as_mut() {
+                                    if *status >= 200 && *status < 300 {
+                                        action.response_example = Some(response.clone());
+                                        action.body_example = body.as_ref().map(|b| b.to_string());
 
-                                    if db.upsert_action(&action, true).await.is_err() {
-                                        pb.println("Error inserting action");
+                                        if db.upsert_action(action, true).await.is_err() {
+                                            pb.println("Error inserting action");
+                                        }
                                     }
                                 }
                             }
@@ -421,21 +411,13 @@ impl RunActionArgs {
                             }
 
                             // finish current pb
-                            pb.finish_with_message(format!(
-                                "{}  {}",
-                                fetch_result
-                                    .as_ref()
-                                    .map(|r| {
-                                        let s = r.status.to_string();
-                                        if r.is_success() {
-                                            format!("{} ✅", s.green())
-                                        } else {
-                                            format!("{} ❌", s.red())
-                                        }
-                                    })
-                                    .unwrap_or("".to_string()),
-                                format_query(&action, computed_url, query_params.as_ref())
-                            ));
+                            Self::finish_progress_bar(
+                                &pb,
+                                fetch_result.as_ref(),
+                                &action_verb,
+                                computed_url,
+                                query_params.as_ref(),
+                            );
 
                             // returning mixed of result etc...
                             R {
@@ -446,9 +428,9 @@ impl RunActionArgs {
                         }
                     }),
             )
-                .await;
+            .await;
 
-            let xtracted_path = self.get_xtracted_path(xtract_path, &xtended_ctx);
+            let xtracted_path = get_xtracted_path(xtract_path, self.force, &xtended_ctx);
 
             for action_result in fetch_results {
                 // handle result and print extracted data
@@ -466,7 +448,7 @@ impl RunActionArgs {
 
         // save as requested
         if self.save_as.is_some() {
-            db.upsert_flow(self.save_as.as_ref().unwrap(), &cloned, self.quiet)
+            db.upsert_flow(self.save_as.as_ref().unwrap(), self, self.quiet)
                 .await?;
         }
 
