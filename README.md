@@ -1,4 +1,4 @@
-# 😁🦀 apicrab
+# 😁🦀 apikrab
 CLI tools to manage your json api call in the terminal for fun only !
 
 
