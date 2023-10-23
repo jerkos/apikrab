@@ -45,7 +45,7 @@ enum Commands {
     History(History),
     /// Print the completion script in stdout
     PrintCompleteScript { shell: Shell },
-    /// Exec sql command
+    /// Exec sql command (for debug purpose)
     Sql { q: String },
 }
 
@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
             generate(
                 shell,
                 &mut Cli::command(),
-                "apicrab".to_string(),
+                "apikrab".to_string(),
                 &mut io::stdout(),
             );
         }

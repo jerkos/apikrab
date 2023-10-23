@@ -8,7 +8,7 @@ use crate::db::dto::{Action, Context, History, Project};
 use crate::http;
 use crate::http::FetchResult;
 use crate::utils::{
-    format_query, get_full_url, get_str_as_interpolated_map,
+    format_query, get_full_url, get_str_as_interpolated_map, parse_cli_conf_to_map,
     parse_multiple_conf_as_opt_with_grouping_and_interpolation,
 };
 use anyhow::Error;
@@ -50,6 +50,10 @@ pub struct RunActionArgs {
     #[arg(short, long)]
     body: Option<Vec<String>>,
 
+    /// optional headers
+    #[arg(short = 'H', long)]
+    headers: Option<Vec<String>>,
+
     /// extract path of the response
     #[arg(short, long)]
     pub extract_path: Option<Vec<String>>,
@@ -69,11 +73,11 @@ pub struct RunActionArgs {
 
     /// force action rerun even if its extracted value exists in current context
     #[arg(long)]
-    pub force: bool,
+    pub(crate) force: bool,
 
     /// print the output of the command
     #[arg(long)]
-    pub quiet: bool,
+    pub(crate) quiet: bool,
 
     /// grep the output of the command
     #[arg(long)]
@@ -317,7 +321,13 @@ impl RunActionArgs {
                 action.as_ref().map(|a| a.headers.as_str()).unwrap_or("{}"),
                 &xtended_ctx,
             )
-            .unwrap_or(HashMap::new());
+            .unwrap_or_else(|| {
+                let headers_from_cli = parse_cli_conf_to_map(self.headers.as_ref());
+                headers_from_cli
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .collect()
+            });
 
             // all possible query params
             let computed_query_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(

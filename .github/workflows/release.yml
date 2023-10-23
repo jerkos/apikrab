@@ -30,7 +30,7 @@ jobs:
       - name: Extract crate information
         shell: bash
         run: |
-          echo "PROJECT_NAME=apicrab" >> $GITHUB_ENV
+          echo "PROJECT_NAME=apikrab" >> $GITHUB_ENV
           echo "PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -95,7 +95,7 @@ jobs:
           SUM_PATH=${PKG_STAGING}/${SUM_NAME}
           OS="$(uname -s)"
 
-          if [ "$OS" == "Linux" ]; then 
+          if [ "$OS" == "Linux" ]; then
             sha256sum ${PKG_PATH} > ${SUM_PATH}
           elif [ "$OS" == "Darwin" ]; then
             shasum -a 256 ${PKG_PATH} > ${SUM_PATH}

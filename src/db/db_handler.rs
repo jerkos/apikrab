@@ -62,7 +62,7 @@ COMMIT;
 
 /// Error messages
 static PROJECT_NOT_FOUND: &str =
-    "Project not found. Did you forget to create it running `apicrab project new <project_name>`?";
+    "Project not found. Did you forget to create it running `apikrab project new <project_name>`?";
 static CONNECTION_ERROR: &str = "Connection to database failed";
 
 #[derive(Clone)]
