@@ -1,9 +1,9 @@
-mod _http_result;
+pub(crate) mod _http_result;
 pub(crate) mod _printer;
-mod _run_helper;
-mod _test_checker;
+pub(crate) mod _progress_bar;
+pub(crate) mod _run_helper;
+pub(crate) mod _test_checker;
 pub(crate) mod action;
-mod flow;
 mod test_suite;
 
 use clap::{Args, Subcommand};
@@ -20,8 +20,6 @@ pub struct Run {
 pub enum RunCommands {
     /// Run an action
     Action(RunActionArgs),
-    /// Run a saved flow
-    Flow(flow::RunFlowArgs),
     /// Run a saved test suite
     TestSuite(test_suite::TestSuiteArgs),
 }

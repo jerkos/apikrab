@@ -4,16 +4,43 @@ use rand::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+const SINGLE_INTERPOL_START: char = '{';
+const SINGLE_INTERPOL_END: char = '}';
+const MULTI_INTERPOL_START: &str = "{{";
+const MULTI_INTERPOL_END: &str = "}}";
+
+#[derive(Debug, Clone, Copy)]
+pub enum Interpol {
+    MultiInterpol,
+    SimpleInterpol,
+}
+
 /// a string is interpolated if it contains {{ and }}
-pub fn contains_interpolation(str: &str) -> bool {
-    str.contains("{{") && str.contains("}}")
+pub fn contains_interpolation(str: &str, interpol: Interpol) -> bool {
+    match interpol {
+        Interpol::MultiInterpol => {
+            str.contains(MULTI_INTERPOL_START) && str.contains(MULTI_INTERPOL_END)
+        }
+        Interpol::SimpleInterpol => {
+            str.contains(SINGLE_INTERPOL_START) && str.contains(SINGLE_INTERPOL_END)
+        }
+    }
+}
+
+/// check if a map contains interpolation
+pub fn map_contains_interpolation(map: &HashMap<String, String>, interpol: Interpol) -> bool {
+    map.values().any(|v| contains_interpolation(v, interpol))
 }
 
 /// returning a cow here to avoid cloning the string
 /// body is supposed to be a json string and therefore
 /// can be quite long
-pub fn replace_with_conf<'a>(str: &'a str, conf: &HashMap<String, String>) -> Cow<'a, str> {
-    if !contains_interpolation(str) {
+pub fn replace_with_conf<'a>(
+    str: &'a str,
+    conf: &HashMap<String, String>,
+    interpol: Interpol,
+) -> Cow<'a, str> {
+    if !contains_interpolation(str, interpol) {
         return Cow::Borrowed(str);
     }
     let interpolated = conf.iter().fold(str.to_string(), |acc, (k, v)| {
@@ -24,23 +51,23 @@ pub fn replace_with_conf<'a>(str: &'a str, conf: &HashMap<String, String>) -> Co
 
 /// Parse a configuration key: str, val: str from a vec of str to a hashmap
 /// Used to parse cli commands
-pub fn parse_cli_conf_to_map(conf: Option<&Vec<String>>) -> HashMap<&str, &str> {
+pub fn parse_cli_conf_to_map(conf: Option<&Vec<String>>) -> Option<HashMap<String, String>> {
     match conf {
-        Some(conf) => conf
-            .iter()
-            .map(|s| s.split(':').collect::<Vec<_>>())
-            .map(|v| (v[0], v[1]))
-            .collect(),
-
-        None => HashMap::new(),
+        Some(conf) => Some(
+            conf.iter()
+                .map(|s| s.split(':').collect::<Vec<_>>())
+                .map(|v| (v[0].to_string(), v[1..].join(":")))
+                .collect(),
+        ),
+        None => None,
     }
 }
 
 /// Parse a configuration key: str, val: str from a vec of str to a hashmap
 /// conf can be json or values separated by comma
-pub fn _parse_multiple_conf<'a, T, F>(conf: &'a str, func: F) -> HashMap<&'a str, T>
+pub fn _parse_multiple_conf<'a, T, F>(conf: &'a str, func: F) -> HashMap<String, T>
 where
-    F: Fn(Option<&'a str>) -> T,
+    F: Fn(Option<String>) -> T,
     T: serde::de::Deserialize<'a>,
 {
     // try parse json string first
@@ -51,32 +78,36 @@ where
             conf.split(',')
                 .map(|s| {
                     let mut split = s.split(':');
-                    (split.next().unwrap(), func(split.next()))
+                    (
+                        split.next().unwrap().to_string(),
+                        func(split.next().map(|v| v.to_string())),
+                    )
                 })
                 .collect::<HashMap<_, _>>()
         })
 }
 
-pub fn parse_multiple_conf<'a>(conf: &'a str) -> HashMap<&'a str, &'a str> {
-    let closure = |v: Option<&'a str>| v.unwrap();
+pub fn parse_multiple_conf<'a>(conf: &'a str) -> HashMap<String, String> {
+    let closure = |v: Option<String>| v.unwrap();
     _parse_multiple_conf(conf, closure)
 }
 
 /// only for extracted path
 /// it is not json for sure
-pub fn parse_multiple_conf_with_opt<'a>(conf: &'a str) -> HashMap<&'a str, Option<&'a str>> {
-    let closure = |v: Option<&'a str>| v;
+pub fn parse_multiple_conf_with_opt<'a>(conf: &'a str) -> HashMap<String, Option<String>> {
+    let closure = |v: Option<String>| v;
     _parse_multiple_conf(conf, closure)
 }
 
 pub fn get_str_as_interpolated_map(
     data: &str,
     ctx: &HashMap<String, String>,
+    interpol: Interpol,
 ) -> Option<HashMap<String, String>> {
     if data.is_empty() {
         return None;
     }
-    let interpolated = replace_with_conf(data, ctx);
+    let interpolated = replace_with_conf(data, ctx, interpol);
 
     Some(
         parse_multiple_conf(&interpolated)
@@ -115,8 +146,12 @@ fn _parse_multiple_conf_as_opt_with_grouping(str: Cow<str>) -> HashMap<String, V
 pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation(
     conf: &str,
     ctx: &HashMap<String, String>,
+    interpol: Interpol,
 ) -> Vec<Option<HashMap<String, String>>> {
-    let p = replace_with_conf(conf, ctx);
+    let p = replace_with_conf(conf, ctx, interpol);
+    if p.is_empty() {
+        return vec![];
+    }
     let parsed_conf = _parse_multiple_conf_as_opt_with_grouping(p);
     if parsed_conf.is_empty() {
         return vec![None];
@@ -192,7 +227,7 @@ mod tests {
             .into_iter()
             .collect::<HashMap<_, _>>();
         let str = "a:{{a}}";
-        let interpolated = replace_with_conf(str, &conf);
+        let interpolated = replace_with_conf(str, &conf, Interpol::MultiInterpol);
         assert_eq!(interpolated, "a:1");
     }
 

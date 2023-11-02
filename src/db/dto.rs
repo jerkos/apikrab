@@ -3,37 +3,42 @@ use crate::commands::project::create::CreateProjectArgs;
 use crate::commands::run::action::RunActionArgs;
 use crate::utils::parse_cli_conf_to_map;
 use colored::Colorize;
-use itertools::EitherOrBoth::Both;
-use itertools::{EitherOrBoth, Itertools};
+use serde_json::to_string;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct Project {
-    pub name: String,
-    pub test_url: Option<String>,
-    pub prod_url: Option<String>,
-    pub conf: String,
+    pub(crate) id: Option<i64>,
+    pub(crate) name: String,
+    pub(crate) main_url: String,
+    pub(crate) conf: Option<String>,
+    pub(crate) created_at: Option<chrono::NaiveDateTime>,
+    pub(crate) updated_at: Option<chrono::NaiveDateTime>,
 }
 
 impl Project {
-    pub fn get_conf(&self) -> HashMap<String, String> {
-        serde_json::from_str(&self.conf).expect("Error deserializing conf")
+    pub fn get_project_conf(&self) -> anyhow::Result<HashMap<String, String>> {
+        match self.conf {
+            None => Ok(HashMap::new()),
+            Some(ref conf) => {
+                let r = serde_json::from_str(conf);
+                match r {
+                    Ok(r) => Ok(r),
+                    Err(e) => {
+                        anyhow::bail!(e)
+                    }
+                }
+            }
+        }
     }
 }
 
 impl Display for Project {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let test_url = match &self.test_url {
-            Some(url) => url.yellow(),
-            None => "N/A".to_string().yellow(),
-        };
-        let prod_url = match &self.prod_url {
-            Some(url) => url.yellow(),
-            None => "N/A".to_string().yellow(),
-        };
         let mut conf_keys = self
-            .get_conf()
+            .get_project_conf()
+            .expect("Error getting project conf")
             .keys()
             .map(String::from)
             .collect::<Vec<String>>()
@@ -43,10 +48,8 @@ impl Display for Project {
         }
         write!(
             f,
-            "{}\n   test: {} prod: {}\n   conf: {}",
+            "{}\n  conf: {}",
             self.name.bold().blue(),
-            test_url,
-            prod_url,
             conf_keys.red()
         )
     }
@@ -54,81 +57,98 @@ impl Display for Project {
 
 impl From<&CreateProjectArgs> for Project {
     fn from(args: &CreateProjectArgs) -> Self {
-        let conf = parse_cli_conf_to_map(args.conf.as_ref());
-        let conf_as_str = serde_json::to_string(&conf).expect("Error serializing conf");
+        let project_conf = parse_cli_conf_to_map(args.conf.as_ref());
         Project {
+            id: None,
             name: args.name.clone(),
-            test_url: args.test_url.clone(),
-            prod_url: args.prod_url.clone(),
-            conf: conf_as_str,
+            main_url: args.url.clone(),
+            conf: to_string(&project_conf).ok(),
+            created_at: None,
+            updated_at: None,
         }
     }
 }
 
 #[derive(sqlx::FromRow, Debug, Clone, Default)]
 pub struct Action {
-    pub name: String,
-    pub url: String,
-    pub verb: String,
-    pub static_body: Option<String>,
-    pub headers: String,
-    pub body_example: Option<String>,
-    pub response_example: Option<String>,
-    pub project_name: String,
+    pub(crate) id: Option<i64>,
+    pub(crate) name: Option<String>,
+    // when basically add an action to a project
+    // this can be empty
+    pub(crate) run_action_args: Option<String>,
+    // metadata
+    pub(crate) body_example: Option<String>,
+    pub(crate) response_example: Option<String>,
+    // foreign key
+    pub(crate) project_name: Option<String>,
+    // chrono
+    pub(crate) created_at: Option<chrono::NaiveDateTime>,
+    pub(crate) updated_at: Option<chrono::NaiveDateTime>,
 }
 
+// todo use an intermediate struct to parse run_action_args
 impl Action {
-    pub fn headers_as_map(&self) -> HashMap<String, String> {
-        serde_json::from_str(&self.headers).expect("Error deserializing headers")
+    pub fn get_run_action_args(&self) -> anyhow::Result<RunActionArgs> {
+        match self.run_action_args {
+            Some(ref run_action_args) => match serde_json::from_str(run_action_args) {
+                Ok(r) => Ok(r),
+                Err(e) => anyhow::bail!(e),
+            },
+            None => Err(anyhow::anyhow!("No run action args for action")),
+        }
     }
-
-    pub fn is_form(&self) -> bool {
-        self.headers_as_map()
-            .get(reqwest::header::CONTENT_TYPE.as_str())
-            .unwrap_or(&"".to_string())
-            == "application/x-www-form-urlencoded"
+    // try parse headers as a map
+    pub fn get_headers(&self) -> anyhow::Result<HashMap<String, String>> {
+        match self.get_run_action_args() {
+            Ok(r) => Ok(parse_cli_conf_to_map(r.header.as_ref()).unwrap()),
+            Err(e) => anyhow::bail!(e),
+        }
     }
 }
 
 impl From<&AddActionArgs> for Action {
-    fn from(value: &AddActionArgs) -> Self {
-        let mut headers = parse_cli_conf_to_map(value.header.as_ref());
-        if value.url_encoded {
-            headers.insert(
-                reqwest::header::CONTENT_TYPE.as_ref(),
-                "application/x-www-form-urlencoded",
-            );
-        }
-        if value.form_data {
-            headers.insert(
-                reqwest::header::CONTENT_TYPE.as_ref(),
-                "multipart/form-data",
-            );
+    fn from(add_action_args: &AddActionArgs) -> Self {
+        // panicking if both are defined
+        if add_action_args.url_encoded && add_action_args.form_data {
+            panic!("Cannot have both url encoded and form data");
         }
 
-        let headers_as_str = serde_json::to_string(&headers).expect("Error serializing headers");
         Action {
-            name: value.name.clone(),
-            url: value.url.clone(),
-            verb: value.verb.clone(),
-            static_body: value.static_body.clone(),
-            headers: headers_as_str,
+            // action is none because it's not in db yet
+            id: None,
+            name: Some(add_action_args.name.clone()),
+            run_action_args: None,
             body_example: None,
             response_example: None,
-            project_name: value.project_name.clone(),
+            project_name: Some(add_action_args.project_name.clone()),
+            created_at: None,
+            updated_at: None,
         }
     }
 }
 
 impl Display for Action {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let run_actions_args = self
+            .get_run_action_args()
+            .expect("Error getting run action args");
         write!(
             f,
             "{} {} {} {}",
-            self.name.green(),
-            self.verb.cyan(),
-            self.url.yellow(),
-            self.headers_as_map()
+            run_actions_args
+                .name
+                .map(|n| n.green())
+                .unwrap_or("UNKNOWN".green()),
+            run_actions_args
+                .verb
+                .map(|v| v.cyan())
+                .unwrap_or("default".cyan()),
+            run_actions_args
+                .url
+                .map(|u| u.yellow())
+                .unwrap_or("default".yellow()),
+            self.get_headers()
+                .unwrap_or_else(|_| HashMap::new())
                 .iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<String>>()
@@ -139,8 +159,13 @@ impl Display for Action {
     }
 }
 
+/// a Context for storing intermediates variables
+/// when running a flow or several consecutive actions
+/// Inserting a variable with a name which already exist
+/// in the context overrides it.
 #[derive(sqlx::FromRow)]
 pub struct Context {
+    /// value should be a json object
     pub value: String,
 }
 
@@ -179,65 +204,22 @@ impl Display for History {
     }
 }
 
-#[derive(sqlx::FromRow)]
-pub struct Flow {
-    pub name: String,
-    pub run_action_args: String,
-}
-
-impl Flow {
-    pub fn de_run_action_args(&self) -> RunActionArgs {
-        serde_json::from_str::<RunActionArgs>(self.run_action_args.as_str()).unwrap()
-    }
-}
-
-impl Display for Flow {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let ac = self.de_run_action_args();
-        let action = ac.name;
-        let mut chain = ac
-            .chain
-            .unwrap_or(vec![])
-            .iter()
-            .map(|a| a.to_string())
-            .collect::<Vec<String>>();
-        chain.insert(0, action.unwrap_or("UKN".to_string()));
-
-        let extracted = ac.extract_path.unwrap_or(vec![]);
-
-        write!(f, "{}\n   ", self.name.green()).unwrap();
-        let chain_len = chain.len();
-        let mut i = 0;
-        chain.iter().zip_longest(extracted.iter()).for_each(|val| {
-            match val {
-                Both(a, e) => {
-                    write!(f, "{}({})", a.yellow(), e.blue()).unwrap();
-                }
-                EitherOrBoth::Left(a) => {
-                    write!(f, "{}", a.yellow()).unwrap();
-                }
-                EitherOrBoth::Right(e) => {
-                    write!(f, "{}", e.blue()).unwrap();
-                }
-            }
-            i += 1;
-            if i < chain_len {
-                write!(f, " -> ").unwrap();
-            }
-        });
-        Ok(())
-    }
-}
-
+/// a test suite is a collection of flows
+/// with expected results
 #[derive(sqlx::FromRow)]
 pub struct TestSuite {
-    pub name: String,
-    pub created_at: Option<chrono::NaiveDateTime>,
+    pub(crate) id: Option<i64>,
+    pub(crate) name: String,
+    pub(crate) created_at: Option<chrono::NaiveDateTime>,
 }
 
+/// test suite instance are atomic flows with expectations
+/// that are part of a test suite
 #[derive(sqlx::FromRow)]
 pub struct TestSuiteInstance {
-    pub test_suite_name: String,
-    pub flow_name: String,
-    pub expect: String,
+    pub(crate) id: Option<i64>,
+    pub(crate) test_suite_name: String,
+    pub(crate) run_action_args: String,
+    pub(crate) created_at: Option<chrono::NaiveDateTime>,
+    pub(crate) updated_at: Option<chrono::NaiveDateTime>,
 }

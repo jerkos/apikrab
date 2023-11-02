@@ -119,7 +119,7 @@ impl<'a> PostmanImporter<'a> {
                 self.insert_actions(item.item.as_ref().unwrap(), name, project_name, Some(sub_p))
                     .await;
             } else if let Some(action) = Self::items_to_action(item, name, project_name) {
-                let r = self.db_handler.upsert_action(&action, true).await;
+                let r = self.db_handler.upsert_action(&action).await;
                 if r.is_err() {
                     println!("error upserting action: {}", r.err().unwrap());
                 }
@@ -140,13 +140,6 @@ impl<'a> Import for PostmanImporter<'a> {
             ));
         }
         let collection = spec.unwrap();
-
-        // small check that we have a server url
-        if project.test_url.is_none() && project.prod_url.is_none() {
-            return Err(anyhow::anyhow!(
-                "No test_url, prod_url or servers found in postman collection file"
-            ));
-        }
 
         // upsert project first
         self.db_handler.upsert_project(project).await?;

@@ -64,13 +64,6 @@ impl<'a> Import for OpenapiV3Importer<'a> {
     async fn import(&self, input: &str, project: &mut Project) -> anyhow::Result<()> {
         let openapi: OpenAPI = serde_json::from_str(input)?;
 
-        // small check that we have a server url
-        if project.test_url.is_none() && project.prod_url.is_none() && openapi.servers.is_empty() {
-            return Err(anyhow::anyhow!(
-                "No test_url, prod_url or servers found in openapi file"
-            ));
-        }
-
         // upsert project first
         self.db_handler.upsert_project(project).await?;
 
@@ -90,7 +83,7 @@ impl<'a> Import for OpenapiV3Importer<'a> {
                 for (verb, op) in verbs.iter().zip(operations.iter()) {
                     if let Some(op) = op {
                         let action = Self::get_action(op, &path, verb);
-                        self.db_handler.upsert_action(&action, false).await?;
+                        self.db_handler.upsert_action(&action).await?;
                     }
                 }
             }

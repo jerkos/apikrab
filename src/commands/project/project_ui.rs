@@ -3,12 +3,13 @@ use crate::db::dto::{Action, Project};
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
 use crate::utils::random_emoji;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self};
 use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 use std::{io, thread};
 use tokio::runtime::Handle;
+use tui_textarea::{Input, Key};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 enum ActiveArea {
@@ -19,17 +20,21 @@ enum ActiveArea {
     ResponseExample,
 }
 
+const NO_JSON_VALUE: &str = "\"NO_JSON_VALUE\"";
+const NO_JSON_VALUE_UNESCAPED: &str = "NO_JSON_VALUE";
+
 #[derive(Clone)]
-pub(crate) struct ProjectUI {
+pub(crate) struct ProjectUI<'a> {
     db: DBHandler,
     active_area: ActiveArea,
     projects: StatefulList<Project>,
     actions: StatefulList<Action>,
-    body_example_scroll: u16,
-    response_example_scroll: u16,
+    body_ex_text_area: Option<tui_textarea::TextArea<'a>>,
+    resp_ex_text_area: Option<tui_textarea::TextArea<'a>>,
+    current_action_index: (String, bool, bool),
 }
 
-impl ProjectUI {
+impl<'a> ProjectUI<'a> {
     pub fn new(projects: Vec<Project>, db_handler: DBHandler) -> Self {
         Self {
             db: db_handler,
@@ -39,9 +44,37 @@ impl ProjectUI {
                 state: ListState::default(),
                 items: Vec::new(),
             },
-            body_example_scroll: 0,
-            response_example_scroll: 0,
+            body_ex_text_area: None,
+            resp_ex_text_area: None,
+            current_action_index: ("".to_string(), false, false),
         }
+    }
+
+    // clearing a text area
+    fn clear_text_area(text_area: &mut tui_textarea::TextArea) {
+        text_area.move_cursor(tui_textarea::CursorMove::Bottom);
+        for _ in 0..1000 {
+            text_area.delete_newline();
+            text_area.delete_str(0, 100000);
+        }
+    }
+
+    // set text of a text area
+    fn set_text(text_area: &mut tui_textarea::TextArea, text: &str) {
+        text.lines().for_each(|l| {
+            text_area.insert_str(l);
+            text_area.insert_newline()
+        });
+        text_area.move_cursor(tui_textarea::CursorMove::Top)
+    }
+
+    fn payload_as_str_pretty(payload: Option<&str>) -> anyhow::Result<String> {
+        let r = serde_json::to_string_pretty(
+            &serde_json::from_str::<serde_json::Value>(payload.unwrap_or(NO_JSON_VALUE)).unwrap_or(
+                serde_json::Value::String(NO_JSON_VALUE_UNESCAPED.to_string()),
+            ),
+        )?;
+        Ok(r)
     }
 
     fn update_actions(&mut self) {
@@ -66,6 +99,21 @@ impl ProjectUI {
         self.actions = StatefulList::with_items(actions);
     }
 
+    fn set_current_action_index(&mut self) {
+        self.current_action_index = (
+            self.actions
+                .items
+                .get(self.actions.state.selected().unwrap())
+                .unwrap()
+                .name
+                .as_ref()
+                .unwrap_or(&"UNKNOWN".to_string())
+                .clone(),
+            false,
+            false,
+        );
+    }
+
     fn get_color(&self, area: ActiveArea) -> Color {
         if area == self.active_area {
             Color::Blue
@@ -73,14 +121,10 @@ impl ProjectUI {
             Color::DarkGray
         }
     }
-    fn build_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
+    fn build_ui<B: Backend>(&mut self, frame: &mut Frame<B>) -> io::Result<()> {
         let main_layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(vec![
-                Percentage(50),
-                Percentage(50), // examples
-                Min(0),         // fills remaining space
-            ])
+            .constraints(vec![Percentage(40), Percentage(60), Min(0)])
             .split(frame.size());
 
         let project_list = List::new(
@@ -89,30 +133,21 @@ impl ProjectUI {
                 .iter()
                 .map(|p| {
                     let mut conf_keys = p
-                        .get_conf()
+                        .get_project_conf()
+                        .expect("Failed to get project conf")
                         .keys()
                         .map(String::to_string)
                         .collect::<Vec<_>>();
                     conf_keys.sort();
-                    ListItem::new(vec![
-                        Line::styled(
-                            format!(
-                                " {} {}({})",
-                                random_emoji(),
-                                p.name.clone(),
-                                conf_keys.join(", ")
-                            ),
-                            Style::default().fg(Color::LightGreen).bold(),
+                    ListItem::new(vec![Line::styled(
+                        format!(
+                            " {} {}({})",
+                            random_emoji(),
+                            p.name.clone(),
+                            conf_keys.join(", ")
                         ),
-                        Line::styled(
-                            format!(
-                                "    {} | {}",
-                                p.test_url.as_ref().unwrap_or(&"None".to_string()),
-                                p.prod_url.as_ref().unwrap_or(&"None".to_string()),
-                            ),
-                            Style::default().fg(Color::LightBlue),
-                        ),
-                    ])
+                        Style::default().fg(Color::LightGreen).bold(),
+                    )])
                 })
                 .collect::<Vec<_>>(),
         )
@@ -142,32 +177,61 @@ impl ProjectUI {
                 .items
                 .iter()
                 .map(|a| {
+                    let r = a
+                        .get_run_action_args()
+                        .expect("Error getting run action args");
+                    let v = r.verb.unwrap_or("UNKNOWN".to_string());
+                    let url = r.url.unwrap_or("UNKNOWN".to_string());
                     ListItem::new(vec![
                         Line::styled(
-                            a.name.clone(),
+                            r.name.unwrap_or("UNKNOWN".to_string()),
                             Style::default().fg(Color::LightGreen).bold(),
                         ),
                         Line::from(vec![
                             Span::raw("    "),
-                            match a.verb.as_str() {
+                            match v.as_str() {
                                 "POST" => Span::styled(
-                                    a.verb.clone(),
+                                    v,
                                     Style::default().fg(Color::DarkGray).bg(Color::Green),
                                 ),
                                 "GET" => Span::styled(
-                                    a.verb.clone(),
+                                    v,
                                     Style::default().fg(Color::DarkGray).bg(Color::Blue),
                                 ),
-                                _ => Span::styled(
-                                    a.verb.clone(),
+                                "DELETE" => Span::styled(
+                                    v,
                                     Style::default().fg(Color::DarkGray).bg(Color::Red),
+                                ),
+                                "PUT" => Span::styled(
+                                    v,
+                                    Style::default()
+                                        .fg(Color::DarkGray)
+                                        // purple
+                                        .bg(Color::Rgb(128, 0, 128)),
+                                ),
+                                "PATCH" => Span::styled(
+                                    v,
+                                    // purple
+                                    Style::default()
+                                        .fg(Color::DarkGray)
+                                        .bg(Color::Rgb(255, 128, 0)),
+                                ),
+                                _ => Span::styled(
+                                    v,
+                                    Style::default().fg(Color::DarkGray).bg(Color::Yellow),
                                 ),
                             },
                             Span::raw(" "),
-                            Span::styled(a.url.clone(), Style::default().fg(Color::LightBlue)),
+                            Span::styled(url, Style::default().fg(Color::LightBlue)),
                             Span::raw(" "),
                             Span::styled(
-                                if a.is_form() { "(form)" } else { "(json)" },
+                                if r.form_data {
+                                    "(form)"
+                                } else if r.url_encoded {
+                                    "(url encoded)"
+                                } else {
+                                    "(json)"
+                                },
                                 Style::default().fg(Color::DarkGray),
                             ),
                         ]),
@@ -196,125 +260,223 @@ impl ProjectUI {
             .split(right_layout[1]);
 
         let selected_action_index = self.actions.state.selected();
+        // if not select action skip the rendering
         if selected_action_index.is_none() {
-            return;
+            return Ok(());
         }
+
+        // getting action body and response example
         let current_action = &self.actions.items[selected_action_index.unwrap()];
-        let action_body = serde_json::to_string_pretty(
-            &serde_json::from_str::<serde_json::Value>(
-                current_action.body_example.as_deref().unwrap_or("{}"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
+        let body_example = Self::payload_as_str_pretty(current_action.body_example.as_deref())
+            .unwrap_or("FAILED TO PARSE BODY EXAMPLE".to_string());
+        let response_example =
+            Self::payload_as_str_pretty(current_action.response_example.as_deref())
+                .unwrap_or("FAILED TO PARSE RESPONSE EXAMPLE".to_string());
 
-        let response_example = serde_json::to_string_pretty(
-            &serde_json::from_str::<serde_json::Value>(
-                current_action.response_example.as_deref().unwrap_or("{}"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
+        vec![
+            self.body_ex_text_area.as_mut(),
+            self.resp_ex_text_area.as_mut(),
+        ]
+        .iter_mut()
+        .zip(vec![ActiveArea::BodyExample, ActiveArea::ResponseExample].iter())
+        .for_each(|(text_area, area)| {
+            let is_body_example = area == &ActiveArea::BodyExample;
+            text_area.as_mut().map(|t| {
+                t.set_block(t.block().unwrap().clone().border_style(Style::default().fg(
+                    if area == &self.active_area {
+                        Color::Blue
+                    } else {
+                        Color::DarkGray
+                    },
+                )));
+                if current_action
+                    .name
+                    .as_ref()
+                    .unwrap_or(&"UNKNOWN".to_string())
+                    == &self.current_action_index.0
+                {
+                    let to_setup = if is_body_example {
+                        !self.current_action_index.1
+                    } else {
+                        !self.current_action_index.2
+                    };
+                    if to_setup {
+                        Self::clear_text_area(t);
+                        Self::set_text(
+                            t,
+                            if is_body_example {
+                                &body_example
+                            } else {
+                                &response_example
+                            },
+                        );
+                        if is_body_example {
+                            self.current_action_index.1 = true;
+                        } else {
+                            self.current_action_index.2 = true;
+                        }
+                    }
+                }
+            });
+            frame.render_widget(
+                text_area.as_mut().unwrap().widget(),
+                bottom_layout[if is_body_example { 0 } else { 1 }],
+            );
+        });
 
-        let action_info = Paragraph::new(Text::from(action_body))
-            .block(
-                Block::default()
-                    .title("body example".gray())
-                    .style(Style::reset())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(self.get_color(ActiveArea::BodyExample))),
-            )
-            .wrap(Wrap { trim: true })
-            .scroll((self.body_example_scroll, 0));
-
-        frame.render_widget(action_info, bottom_layout[0]);
-
-        let response_info = Paragraph::new(Text::from(response_example))
-            .block(
-                Block::default()
-                    .title("Response example".gray())
-                    .style(Style::reset())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(self.get_color(ActiveArea::ResponseExample))),
-            )
-            .wrap(Wrap { trim: true })
-            .scroll((self.response_example_scroll, 0));
-
-        frame.render_widget(response_info, bottom_layout[1]);
+        Ok(())
     }
 }
 
-impl UIRunner for ProjectUI {
+impl UIRunner for ProjectUI<'_> {
+    fn init(&mut self) {
+        let mut body_ex_text_area = tui_textarea::TextArea::default();
+        body_ex_text_area.set_line_number_style(Style::default().bg(Color::DarkGray));
+        body_ex_text_area.set_block(
+            Block::default()
+                .title("Body example".gray())
+                .style(Style::reset())
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(self.get_color(ActiveArea::ResponseExample))),
+        );
+        self.body_ex_text_area = Some(body_ex_text_area);
+
+        let mut resp_ex_text_area = tui_textarea::TextArea::default();
+        resp_ex_text_area.set_line_number_style(Style::default().bg(Color::DarkGray));
+        resp_ex_text_area.set_block(
+            Block::default()
+                .title("Response example".gray())
+                .style(Style::reset())
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(self.get_color(ActiveArea::ResponseExample))),
+        );
+        self.resp_ex_text_area = Some(resp_ex_text_area);
+    }
+
     fn handle_event(&mut self) -> io::Result<bool> {
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(true),
-                    KeyCode::Char('b') => {
-                        self.active_area = ActiveArea::BodyExample;
-                    }
-                    KeyCode::Char('r') => {
-                        self.active_area = ActiveArea::ResponseExample;
-                    }
-                    KeyCode::Esc => {
-                        if self.active_area == ActiveArea::BodyExample
-                            || self.active_area == ActiveArea::ResponseExample
-                        {
-                            self.active_area = ActiveArea::ActionPane;
-                        }
-                    }
-                    KeyCode::Left => {
-                        self.active_area = ActiveArea::ProjectPane;
-                    }
-                    KeyCode::Right => {
-                        self.active_area = ActiveArea::ActionPane;
-                    }
-                    KeyCode::Up => match &mut self.active_area {
-                        ActiveArea::ProjectPane => {
-                            self.projects.previous();
-                            self.update_actions();
-                        }
-                        ActiveArea::ActionPane => {
-                            self.actions.previous();
-                            self.response_example_scroll = 0;
-                            self.body_example_scroll = 0;
-                        }
-                        ActiveArea::BodyExample => {
-                            self.body_example_scroll = if self.body_example_scroll == 0 {
-                                0
-                            } else {
-                                self.body_example_scroll - 1
-                            }
-                        }
-                        ActiveArea::ResponseExample => {
-                            self.response_example_scroll = if self.response_example_scroll == 0 {
-                                0
-                            } else {
-                                self.response_example_scroll - 1
-                            }
-                        }
-                    },
-                    KeyCode::Down => match self.active_area {
-                        ActiveArea::ProjectPane => {
-                            self.projects.next();
-                            self.update_actions();
-                        }
-                        ActiveArea::ActionPane => {
-                            self.actions.next();
-                            self.response_example_scroll = 0;
-                            self.body_example_scroll = 0;
-                        }
-                        ActiveArea::BodyExample => self.body_example_scroll += 1,
-                        ActiveArea::ResponseExample => self.response_example_scroll += 1,
-                    },
-                    _ => {}
+        let ev = event::read()?;
+        match ev.into() {
+            Input { key: Key::Esc, .. } => match self.active_area {
+                ActiveArea::BodyExample | ActiveArea::ResponseExample => {
+                    self.active_area = ActiveArea::ActionPane;
                 }
-            }
+                // early escape
+                _ => return Ok(true),
+            },
+            input @ Input {
+                key: Key::Right,
+                ctrl: false,
+                alt: false,
+            } => match &mut self.active_area {
+                ActiveArea::ProjectPane => {
+                    self.active_area = ActiveArea::ActionPane;
+                }
+                ActiveArea::BodyExample => {
+                    let _ = self.body_ex_text_area.as_mut().unwrap().input(input);
+                }
+                ActiveArea::ResponseExample => {
+                    let _ = self.resp_ex_text_area.as_mut().unwrap().input(input);
+                }
+                _ => {}
+            },
+            input @ Input {
+                key: Key::Left,
+                ctrl: false,
+                alt: false,
+            } => match &mut self.active_area {
+                ActiveArea::ActionPane => {
+                    self.active_area = ActiveArea::ProjectPane;
+                }
+                ActiveArea::BodyExample => {
+                    let _ = self.body_ex_text_area.as_mut().unwrap().input(input);
+                }
+                ActiveArea::ResponseExample => {
+                    let _ = self.resp_ex_text_area.as_mut().unwrap().input(input);
+                }
+                _ => {}
+            },
+            input @ Input {
+                key: Key::Up,
+                ctrl: false,
+                alt: false,
+            } => match &mut self.active_area {
+                ActiveArea::ProjectPane => {
+                    self.projects.previous();
+                    self.update_actions();
+                }
+                ActiveArea::ActionPane => {
+                    self.actions.previous();
+                    self.set_current_action_index();
+                }
+                ActiveArea::BodyExample => {
+                    let _ = self.body_ex_text_area.as_mut().unwrap().input(input);
+                }
+                ActiveArea::ResponseExample => {
+                    let _ = self.resp_ex_text_area.as_mut().unwrap().input(input);
+                }
+            },
+            input @ Input {
+                key: Key::Down,
+                ctrl: false,
+                alt: false,
+            } => match self.active_area {
+                ActiveArea::ProjectPane => {
+                    self.projects.next();
+                    self.update_actions();
+                }
+                ActiveArea::ActionPane => {
+                    self.actions.next();
+                    self.set_current_action_index();
+                }
+                ActiveArea::BodyExample => {
+                    let _ = self.body_ex_text_area.as_mut().unwrap().input(input);
+                }
+                ActiveArea::ResponseExample => {
+                    let _ = self.resp_ex_text_area.as_mut().unwrap().input(input);
+                }
+            },
+            input => match self.active_area {
+                ActiveArea::ResponseExample => {
+                    let _ = self.resp_ex_text_area.as_mut().unwrap().input(input);
+                }
+                ActiveArea::BodyExample => {
+                    let _ = self.body_ex_text_area.as_mut().unwrap().input(input);
+                }
+                ActiveArea::ActionPane => match input {
+                    Input {
+                        key: Key::Char('r'),
+                        ctrl: true,
+                        ..
+                    } => self.active_area = ActiveArea::ResponseExample,
+                    Input {
+                        key: Key::Char('b'),
+                        ctrl: true,
+                        ..
+                    } => self.active_area = ActiveArea::BodyExample,
+                    Input {
+                        key: Key::Char('q'),
+                        ctrl: false,
+                        alt: false,
+                    } => return Ok(true),
+                    _ => {}
+                },
+                _ => match input {
+                    Input {
+                        key: Key::Char('q'),
+                        ..
+                    } => return Ok(true),
+                    _ => {}
+                },
+            },
         }
+
         Ok(false)
     }
 
     fn ui<B: Backend>(&mut self, f: &mut Frame<B>) {
-        self.build_ui(f);
+        let r = self.build_ui(f);
+        if let Err(e) = r {
+            println!("Error: {}", e);
+        }
     }
 }

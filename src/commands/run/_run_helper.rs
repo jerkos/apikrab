@@ -1,9 +1,11 @@
 use crate::utils::{
     parse_multiple_conf, parse_multiple_conf_as_opt_with_grouping_and_interpolation,
-    parse_multiple_conf_with_opt, replace_with_conf,
+    parse_multiple_conf_with_opt, replace_with_conf, Interpol,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+
+use super::action::RunActionArgs;
 
 static ANONYMOUS_ACTION: &str = "UNKNOWN";
 
@@ -14,24 +16,26 @@ pub fn is_anonymous_action(action_name: &str) -> bool {
 
 /// Check arguments, could be probably done with clap
 /// but I'm too lazy to do it
-pub(crate) fn check_input(
-    name: Option<&str>,
-    verb: Option<&str>,
-    url: Option<&str>,
-) -> anyhow::Result<()> {
-    let tuple = (verb, url);
-    match name {
-        None => match tuple {
-            (Some(_), Some(_)) => Ok(()),
-            _ => anyhow::bail!("Verb and url are required"),
-        },
-        Some(_) => match tuple {
-            (Some(_), Some(_)) => {
-                anyhow::bail!("Verb and url are provided but got an action as input")
-            }
-            _ => Ok(()),
-        },
+pub(crate) fn check_input(run_action_args: &RunActionArgs) -> anyhow::Result<()> {
+    let mut err = vec![];
+    if run_action_args.save_to_ts.is_some() && run_action_args.expect.is_none() {
+        err.push("Expect is required when saving to test suite");
     }
+    if run_action_args.save.is_some() && run_action_args.save_to_ts.is_some() {
+        err.push("Cannot save to flow and test suite at the same time");
+    }
+    let tuple = (run_action_args.verb.as_ref(), run_action_args.url.as_ref());
+    match run_action_args.name.as_ref() {
+        None => match tuple {
+            (Some(_), Some(_)) => {}
+            _ => err.push("Verb and url are required"),
+        },
+        _ => {}
+    }
+    if !err.is_empty() {
+        anyhow::bail!(err.join("\n"));
+    }
+    Ok(())
 }
 
 pub enum BodyType<'bt> {
@@ -71,7 +75,7 @@ pub fn get_body<'a>(
     body_example: Option<&'a str>,
     ctx: &HashMap<String, String>,
 ) -> Option<Cow<'a, str>> {
-    let interpolated_body = replace_with_conf(body, ctx);
+    let interpolated_body = replace_with_conf(body, ctx, Interpol::MultiInterpol);
 
     match &interpolated_body {
         // if static body exists, use it otherwise None is used
@@ -98,13 +102,22 @@ pub fn get_computed_urls(
     action_url: &str,
     ctx: &HashMap<String, String>,
 ) -> HashSet<String> {
-    let all_path_params =
-        parse_multiple_conf_as_opt_with_grouping_and_interpolation(path_params, ctx);
-
     let full_url = match project_url {
         Some(main_url) => format!("{}/{}", main_url, action_url),
         None => action_url.to_string(),
     };
+
+    // returning url with no interpolation
+    // to be checked later
+    if path_params.is_empty() {
+        return HashSet::from([full_url]);
+    }
+
+    let all_path_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(
+        path_params,
+        ctx,
+        Interpol::SimpleInterpol,
+    );
 
     all_path_params
         .iter()
@@ -122,11 +135,11 @@ pub fn get_computed_urls(
 
 /// Extract path interpolation
 /// Special cases that the name may or may not be present
-pub fn get_xtracted_path<'a>(
-    extracted_path: &'a str,
+pub fn get_xtracted_path(
+    extracted_path: &str,
     force: bool,
     ctx: &HashMap<String, String>,
-) -> Option<HashMap<&'a str, Option<&'a str>>> {
+) -> Option<HashMap<String, Option<String>>> {
     if extracted_path.is_empty() {
         return None;
     }
@@ -134,7 +147,7 @@ pub fn get_xtracted_path<'a>(
 
     let all_values = value
         .values()
-        .filter_map(|v| *v)
+        .filter_map(|v| v.as_ref())
         .map(|v| ctx.contains_key(v))
         .collect::<Vec<_>>();
 
@@ -144,4 +157,56 @@ pub fn get_xtracted_path<'a>(
         return None;
     }
     Some(value)
+}
+
+/// Merge cli args with db args
+/// Usually db args are overridden by cli args
+///
+/// ```rust
+/// let mut run_action_args = RunActionArgs::default();
+/// let o = RunActionArgs {
+///    verb: Some("GET".to_string()),
+///   body: Some("".to_string()),
+/// };
+/// merge_with(&mut run_action_args, &o);
+/// ```
+pub fn merge_with(run_actions_args: &RunActionArgs, o: &RunActionArgs) -> RunActionArgs {
+    let mut clone = run_actions_args.clone();
+    if o.verb.is_some() {
+        clone.verb = o.verb.clone();
+    }
+    if o.body.is_some() {
+        clone.body = o.body.clone();
+    }
+    if o.path_params.is_some() {
+        clone.path_params = o.path_params.clone();
+    }
+    if o.query_params.is_some() {
+        clone.query_params = o.query_params.clone();
+    }
+    if o.header.is_some() {
+        clone.header = o.header.clone();
+    }
+    if o.chain.is_some() {
+        clone.chain = o.chain.clone();
+    }
+    if o.name.is_some() {
+        clone.name = o.name.clone();
+    }
+    if o.extract_path.is_some() {
+        clone.extract_path = o.extract_path.clone();
+    }
+    if o.url.is_some() {
+        clone.url = o.url.clone();
+    }
+    if o.expect.is_some() {
+        clone.expect = o.expect.clone();
+    }
+    if o.form_data {
+        clone.form_data = o.form_data;
+    }
+    if o.url_encoded {
+        clone.url_encoded = o.url_encoded;
+    }
+    clone
 }

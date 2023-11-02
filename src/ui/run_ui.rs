@@ -42,6 +42,7 @@ pub trait StatefulTable {
 }
 
 pub trait UIRunner {
+    // default function for handling event
     fn handle_event(&mut self) -> io::Result<bool> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
@@ -52,13 +53,21 @@ pub trait UIRunner {
         }
         Ok(false)
     }
+
+    fn init(&mut self) {}
+
+    // render method for the UI
     fn ui<B: Backend>(&mut self, f: &mut Frame<B>);
 
+    // main entry point to enter in ui mode
     fn run_ui(&mut self) -> anyhow::Result<()> {
         // setup terminal
+        let stdout = io::stdout();
+        let mut stdout = stdout.lock();
+
         enable_raw_mode()?;
-        let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
@@ -82,6 +91,8 @@ pub trait UIRunner {
     }
 
     fn run_app<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+        self.init();
+
         loop {
             terminal.draw(|f| self.ui(f))?;
 

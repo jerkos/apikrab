@@ -1,10 +1,10 @@
 mod commands;
 mod db;
+pub mod domain;
 mod http;
 mod json_path;
 mod ui;
 mod utils;
-
 use std::io;
 use std::path::PathBuf;
 
@@ -16,7 +16,6 @@ use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
 use sqlx::{Column, Executor, Row};
 
-use crate::commands::flow::{Flow, FlowCommands};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
@@ -37,8 +36,6 @@ enum Commands {
     Project(Project),
     /// Run a project action, flow or test suite
     Run(Run),
-    /// Get information about existing flows
-    Flow(Flow),
     /// Test suite information
     TestSuite(TestSuite),
     /// List all history call
@@ -90,10 +87,9 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::Run(run) => match &mut run.run_commands {
             RunCommands::Action(run_action_args) => {
-                run_action_args.run_action(&requester, &db_handler).await?;
-            }
-            RunCommands::Flow(run_flow_args) => {
-                run_flow_args.run_flow(&db_handler, &requester).await?;
+                let _ = run_action_args
+                    .run_action(&requester, &db_handler, None)
+                    .await;
             }
             RunCommands::TestSuite(test_suite_args) => {
                 test_suite_args
@@ -101,19 +97,11 @@ async fn main() -> anyhow::Result<()> {
                     .await?;
             }
         },
-        Commands::Flow(flow) => match &mut flow.flow_commands {
-            FlowCommands::List(flow_list_args) => {
-                flow_list_args.list_flows(&db_handler).await?;
-            }
-        },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {
             TestSuiteCommands::New(create_test_suite_args) => {
                 create_test_suite_args
                     .upsert_test_suite(&db_handler)
                     .await?;
-            }
-            TestSuiteCommands::AddTestSuite(add_test_suite_args) => {
-                add_test_suite_args.add_test_suite(&db_handler).await?;
             }
         },
         Commands::History(history) => match &mut history.history_commands {
@@ -157,7 +145,12 @@ async fn main() -> anyhow::Result<()> {
                                             "{}{}: {}, ",
                                             acc,
                                             col.name(),
-                                            sqlite_row.try_get::<String, _>(col.name()).unwrap()
+                                            sqlite_row
+                                                .try_get::<String, _>(col.name())
+                                                .unwrap_or_else(|_| sqlite_row
+                                                    .try_get::<i32, _>(col.name())
+                                                    .map(|i| i.to_string())
+                                                    .unwrap())
                                         )
                                     })
                             );

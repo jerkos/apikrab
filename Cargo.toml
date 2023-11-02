@@ -32,3 +32,4 @@ postman_collection = "0.2.0"
 async-recursion = "1.0.5"
 indicatif = {version = "0.17.5", features=["tokio"]}
 home = "0.5.5"
+tui-textarea = {version = "0.2.4", features=["ratatui-crossterm"], default-features = false}

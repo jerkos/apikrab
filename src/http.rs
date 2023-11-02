@@ -41,7 +41,7 @@ impl Api {
         verb: &str,
         headers: &HashMap<String, String>,
         query_params: Option<&HashMap<String, String>>,
-        body: Option<&Cow<'_, str>>,
+        body: Option<Cow<'_, str>>,
     ) -> anyhow::Result<FetchResult> {
         // building request
         let mut builder = match verb {
@@ -54,8 +54,8 @@ impl Api {
         };
 
         // query params
-        if query_params.is_some() {
-            builder = builder.query(query_params.as_ref().unwrap());
+        if let Some(qp) = query_params.as_ref() {
+            builder = builder.query(qp);
         }
 
         // Add custom headers

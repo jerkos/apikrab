@@ -2,6 +2,7 @@ use crate::commands::run::action::R;
 use crate::http::FetchResult;
 use assert_json_diff::{assert_json_eq, assert_json_include};
 use crossterm::style::Stylize;
+use indicatif::ProgressBar;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::panic::catch_unwind;
@@ -25,8 +26,9 @@ impl<'a> TestChecker<'a> {
         }
     }
 
-    pub fn print_err(&self, got: &str, expected: &str) {
-        let r = format!("   Expected {} got {}", expected, got).red();
+    pub fn print_err(&self, key: &str, got: &str, expected: &str) {
+        let gott = if got.is_empty() { "EMPTY STR" } else { got };
+        let r = format!("   Expected '{}' to be `{}` got `{}`", key, expected, gott).red();
         println!("{}", r);
     }
 
@@ -38,7 +40,7 @@ impl<'a> TestChecker<'a> {
                 "STATUS_CODE" => {
                     let status_code = result.status.to_string();
                     if status_code.as_str() != value {
-                        self.print_err(&status_code, value);
+                        self.print_err("STATUS_CODE", &status_code, value);
                         return false;
                     }
                     true
@@ -66,7 +68,7 @@ impl<'a> TestChecker<'a> {
                         let empty_str = "".to_string();
                         let ctx_value = ctx.get(key).unwrap_or(&empty_str);
                         if ctx_value != value {
-                            self.print_err(ctx_value, value);
+                            self.print_err(key, ctx_value, value);
                             false
                         } else {
                             true
@@ -80,10 +82,15 @@ impl<'a> TestChecker<'a> {
         all_true
     }
 
-    pub fn check(&self, flow_name: &str) -> bool {
-        let f = format!("{} {}...", " 🐞Running flow".green(), flow_name.green());
-        println!("{}", f);
+    pub fn check(&self, flow_name: &str, pb: &ProgressBar) -> Vec<bool> {
+        let f = format!(
+            "{} {}...",
+            "🐞 Analyzing results for".green(),
+            flow_name.green()
+        );
+        pb.suspend(|| println!("{}", f));
 
+        let mut r = vec![];
         for fetch_result in self.fetch_results {
             let status_code = fetch_result
                 .result
@@ -91,21 +98,37 @@ impl<'a> TestChecker<'a> {
                 .map(|r| r.status.to_string())
                 .unwrap_or("".to_string());
 
-            match &fetch_result.result {
-                Ok(_) => println!("   {} {}", "🦄 ??Checking...".green(), status_code),
-                Err(_) => println!("   {} {}", "🦄 ??Checking...".red(), status_code),
-            }
+            let result = fetch_result.result.as_ref();
+            let is_success = match &result {
+                Ok(f) => {
+                    let ctx = &fetch_result.ctx;
+                    let check_r = self._check(f, ctx);
+                    if check_r {
+                        pb.suspend(|| {
+                            println!(
+                                "   {} {}",
+                                "🦄 ??Checking...".green(),
+                                "Tests passed ✅".green()
+                            )
+                        });
+                    } else {
+                        pb.suspend(|| {
+                            println!(
+                                "   {} {}",
+                                "🦄 ??Checking...".red(),
+                                " Some tests failed ❌".red()
+                            )
+                        });
+                    }
+                    check_r
+                }
+                Err(_) => {
+                    println!("   {} {} {}", "🦄 ??Checking...".red(), status_code, "❌");
+                    false
+                }
+            };
+            r.push(is_success);
         }
-
-        let last_result = self.fetch_results.last().unwrap();
-        let result = &last_result.result;
-        if result.is_err() {
-            println!("   {} {}", "🦄".red(), "Error while fetching".red());
-            return false;
-        }
-        let unwrapped_result = result.as_ref().unwrap();
-        let ctx = &last_result.ctx;
-
-        self._check(unwrapped_result, ctx)
+        r
     }
 }
