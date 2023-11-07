@@ -183,14 +183,15 @@ impl DBHandler {
         Ok(())
     }
 
-    pub async fn get_actions(&self, project_name: &str) -> anyhow::Result<Vec<Action>> {
-        let actions = sqlx::query_as::<_, Action>(
-            r#"
-            SELECT *
-            FROM actions a
-            WHERE a.project_name = ?1
-            "#,
-        )
+    pub async fn get_actions(&self, project_name: Option<&str>) -> anyhow::Result<Vec<Action>> {
+        let base = r#"SELECT * FROM actions a "#;
+        let request = match project_name {
+            Some(_) => {
+                format!("{} WHERE a.project_name = ?1", base)
+            }
+            None => format!("{} WHERE a.project_name is NULL", base)
+        };
+        let actions = sqlx::query_as::<_, Action>(&request)
         .bind(project_name)
         .fetch_all(self.get_conn())
         .await?;
@@ -208,8 +209,7 @@ impl DBHandler {
         )
         .bind(action_name)
         .fetch_one(self.get_conn())
-        .await
-        .unwrap_or_else(|_| panic!("Action {} not found", action_name));
+        .await?;
 
         Ok(action)
     }
@@ -294,16 +294,18 @@ impl DBHandler {
         Ok(history)
     }
 
-    pub async fn upsert_test_suite(&self, test_suite_name: &str) -> anyhow::Result<()> {
+    pub async fn upsert_test_suite(&self, test_suite: &TestSuite) -> anyhow::Result<()> {
         let _ = sqlx::query(
             r#"
-            INSERT INTO test_suite (name)
-            VALUES (?1)
-            ON CONFLICT
+            INSERT INTO test_suite (id, name, created_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT (name)
             DO NOTHING;
             "#,
         )
-        .bind(test_suite_name)
+        .bind(test_suite.id)
+        .bind(test_suite.name.clone())
+        .bind(test_suite.created_at)
         .execute(self.get_conn())
         .await?
         .last_insert_rowid();

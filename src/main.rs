@@ -21,6 +21,7 @@ use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
 use crate::db::db_handler::DBHandler;
 use crate::ui::run_ui::UIRunner;
+use crate::db::dto::Project as DtoProject;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -48,6 +49,14 @@ enum Commands {
 
 lazy_static! {
     pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
+    pub static ref DEFAULT_PROJECT: DtoProject =  DtoProject {
+                    id: None,
+                    name: "DEFAULT".to_string(),
+                    main_url: "".to_string(),
+                    conf: None,
+                    created_at: None,
+                    updated_at: None
+                };
 }
 
 #[tokio::main]
@@ -55,9 +64,6 @@ async fn main() -> anyhow::Result<()> {
     // init database if needed
     let mut db_handler = DBHandler::new();
     db_handler.init_db().await?;
-
-    // init http requester
-    let requester = http::Api::new();
 
     // parse cli args
     let mut cli: Cli = Cli::parse();
@@ -80,18 +86,22 @@ async fn main() -> anyhow::Result<()> {
                 project_info_args.show_info(&db_handler).await?;
             }
             ProjectCommands::Ui => {
-                let projects = db_handler.get_projects().await?;
+                let mut projects = db_handler.get_projects().await?;
+                projects.push(DEFAULT_PROJECT.clone());
                 let mut ui = commands::project::project_ui::ProjectUI::new(projects, db_handler);
                 ui.run_ui()?;
             }
         },
         Commands::Run(run) => match &mut run.run_commands {
+            // init http requester
             RunCommands::Action(run_action_args) => {
+                let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
                 let _ = run_action_args
-                    .run_action(&requester, &db_handler, None)
+                    .run_action(&requester, &db_handler, None, None)
                     .await;
             }
             RunCommands::TestSuite(test_suite_args) => {
+                let requester = http::Api::new(Some(10), true);
                 test_suite_args
                     .run_test_suite(&requester, &db_handler)
                     .await?;

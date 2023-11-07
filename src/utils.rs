@@ -80,7 +80,7 @@ where
                     let mut split = s.split(':');
                     (
                         split.next().unwrap().to_string(),
-                        func(split.next().map(|v| v.to_string())),
+                        func(Some(split.map(|v| v.to_string()).collect::<Vec<String>>().join(":"))), //split.next().map(|v| v.to_string())),
                     )
                 })
                 .collect::<HashMap<_, _>>()
@@ -150,7 +150,7 @@ pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation(
 ) -> Vec<Option<HashMap<String, String>>> {
     let p = replace_with_conf(conf, ctx, interpol);
     if p.is_empty() {
-        return vec![];
+        return vec![None];
     }
     let parsed_conf = _parse_multiple_conf_as_opt_with_grouping(p);
     if parsed_conf.is_empty() {
@@ -181,6 +181,20 @@ pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation(
         })
         .collect()
 }
+
+
+/// For query params and path params
+/// if the value is empty then we try to get the value from the current
+/// run_action_args object
+pub fn val_or_join<'a>(val: &'a str, opt: Option<&Vec<String>>) -> Cow<'a, str> {
+    if !val.is_empty() {
+        return Cow::Borrowed(val);
+    }
+        match opt.as_ref() {
+            Some(h) => Cow::Owned(h.iter().filter(|v| !v.is_empty()).join(",")),
+            None => Cow::Owned("".to_string()),
+        }
+    }
 
 /// Generate a random emoji from the unicode range
 /// which is then incorporated in a project name

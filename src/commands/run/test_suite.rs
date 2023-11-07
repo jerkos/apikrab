@@ -1,14 +1,12 @@
 use crate::commands::run::_progress_bar::init_progress_bars;
-use crate::commands::run::_test_checker::TestChecker;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::TestSuiteInstance;
 use crate::http::Api;
 use clap::Args;
 use colored::Colorize;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
 use serde_json::from_str;
 use std::collections::HashMap;
-use std::time::Duration;
 
 use super::action::RunActionArgs;
 
@@ -30,6 +28,7 @@ impl TestSuiteArgs {
         test: &TestSuiteInstance,
         ctx: &HashMap<String, String>,
         multi_progress: &MultiProgress,
+        pb: &indicatif::ProgressBar,
     ) -> anyhow::Result<bool> {
         let mut run_args = from_str::<RunActionArgs>(&test.run_action_args)?;
         run_args.force = true;
@@ -37,7 +36,7 @@ impl TestSuiteArgs {
         // disable all saving !
         run_args.save = None;
         run_args.save_to_ts = None;
-        let (_, r) = run_args.run_action(api, db, Some(multi_progress)).await;
+        let (_, r) = run_args.run_action(api, db, Some(multi_progress), Some(pb)).await;
         Ok(r.iter().all(|b| *b))
     }
 
@@ -57,7 +56,7 @@ impl TestSuiteArgs {
 
         for test in tests {
             let is_success = self
-                .run_test_suite_instance(api, db, &test, &ctx, &multi)
+                .run_test_suite_instance(api, db, &test, &ctx, &multi, &pb)
                 .await?;
             pb.inc(1);
             results.push(is_success);

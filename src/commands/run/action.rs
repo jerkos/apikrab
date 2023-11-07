@@ -2,11 +2,11 @@ use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
 use crate::commands::run::_run_helper::check_input;
 use crate::db::db_handler::DBHandler;
-use crate::db::dto::{Action, TestSuiteInstance};
+use crate::db::dto::{Action, TestSuiteInstance, TestSuite};
 use crate::domain::DomainAction;
-use crate::http;
+use crate::{http, main};
 use crate::http::FetchResult;
-use crate::utils::parse_cli_conf_to_map;
+use crate::utils::{parse_cli_conf_to_map, val_or_join};
 use clap::Args;
 use core::panic;
 use crossterm::style::Stylize;
@@ -17,7 +17,7 @@ use serde_json::to_string;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use super::_progress_bar::init_progress_bars;
+use super::_progress_bar::new_pb;
 use super::_run_helper::merge_with;
 use super::_test_checker::TestChecker;
 
@@ -103,9 +103,27 @@ pub struct RunActionArgs {
     #[arg(long)]
     #[serde(default)]
     pub grep: bool,
+
+    /// do not check ssl certificate
+    #[arg(short='k', long)]
+    #[serde(default)]
+    pub(crate) insecure: bool,
+
+    /// timeout on request
+    #[arg(short, long)]
+    #[serde(default)]
+    pub(crate) timeout: Option<u64>,
+
 }
 
 impl RunActionArgs {
+    pub fn header_as_str(&self) -> Option<String> {
+        match self.header.as_ref() {
+            Some(h) => Some(h.iter().filter(|v| !v.is_empty()).join(",")),
+            None => None,
+        }
+    }
+
     pub async fn save_if_needed(
         &self,
         db: &DBHandler,
@@ -148,7 +166,12 @@ impl RunActionArgs {
         match &self.save_to_ts {
             Some(ts_name) => {
                 // ensuring test suite exists
-                db.upsert_test_suite(ts_name).await?;
+                let ts = TestSuite {
+                    id: None,
+                    name: ts_name.clone(),
+                    created_at: None
+                };
+                db.upsert_test_suite(&ts).await?;
                 // add test instance
                 let r = db
                     .upsert_test_suite_instance(&TestSuiteInstance {
@@ -284,6 +307,7 @@ impl RunActionArgs {
         http: &'a http::Api,
         db: &'a DBHandler,
         multi: Option<&'a MultiProgress>,
+        pb: Option<& 'a ProgressBar>,
     ) -> (Vec<R>, Vec<bool>) {
         // make a clone a the beginning as we mutate
         // this instance latter in prepare method
@@ -306,32 +330,72 @@ impl RunActionArgs {
         // creating progress bars here
         let multi_bar = multi.cloned().unwrap_or(MultiProgress::new());
 
-        let main_pb = multi_bar.add(
-            ProgressBar::new((self.chain.as_ref().map(|c| c.len()).unwrap_or(0) + 1) as u64)
-                .with_style(
-                    ProgressStyle::default_bar()
-                        .template(
-                            "{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
-                        )
-                        .unwrap(),
-                ),
-        );
-        main_pb.enable_steady_tick(Duration::from_millis(100));
+        // main progress bar
+        let main_pb = pb.cloned().unwrap_or_else(|| {
+            let main_pb = multi_bar.add(
+                new_pb((self.chain.as_ref().map(|c| c.len()).unwrap_or(0) + 1) as u64)
+            );
+            main_pb.enable_steady_tick(Duration::from_millis(100));
+            main_pb
+        });
 
-        // get actions to be ran
-        let mut actions = DomainAction::from_run_args(self, db, &ctx).await;
-        // storing results here
         let mut action_results = vec![];
 
-        for action in &mut actions {
-            // i.e if action does not contain any interpolated value
-            if let Some(run_action_args) = &mut action.run_action_args {
-                if run_action_args.chain.is_some() {
-                    let (r, _) = run_action_args.run_action(http, db, multi).await;
+        // prepare the data
+        let _ = self.prepare();
+
+        // iterating over actions in current actions
+        for action_data in self.get_infos().into_iter() {
+            let (
+                action_name,
+                action_header,
+                action_body,
+                xtract_path,
+                path_params,
+                query_params
+            ) = action_data;
+
+            // retrieve action from db if needed
+            let (action, project) = (
+                db.get_action(&action_name).await.ok(),
+                DomainAction::project_from_db(action_name, db).await
+            );
+
+            // retrieve run action args
+            let run_action_args_ac = action
+                .as_ref()
+                .map(|a| a.get_run_action_args().expect("Error loading action"))
+                .unwrap_or(self.clone());
+
+            // println!("{:?}", run_action_args_ac);
+            // println!("path params {:?} {:?}", path_params, val_or_join(path_params, run_action_args_ac.path_params.as_ref()).as_ref());
+            let mut action = DomainAction::from_run_args_data(
+                action_name,
+                run_action_args_ac.verb.as_ref().expect("No verb defined !").as_str(),
+                run_action_args_ac.url.as_ref().expect("No url defined !").as_str(),
+                val_or_join(action_header, run_action_args_ac.header.as_ref()).as_ref(),
+                (action_body, run_action_args_ac.url_encoded, run_action_args_ac.form_data),
+                val_or_join(xtract_path, run_action_args_ac.extract_path.as_ref()).as_ref(),
+                val_or_join(path_params, run_action_args_ac.path_params.as_ref()).as_ref(),
+                val_or_join(query_params, run_action_args_ac.query_params.as_ref()).as_ref(),
+                self.expect.as_ref(),
+                project.as_ref(),
+                None,
+                &ctx,
+            );
+            action.run_action_args = Some(run_action_args_ac);
+
+            //println!("{:?}", action);
+            if let Some(run_action_args) = action.run_action_args.as_mut() {
+                if action.name != "UNKNOWN" && run_action_args.chain.is_some() {
+                    run_action_args.save = None;
+                    let (r, _) = run_action_args.run_action(http, db, Some(&multi_bar), Some(&main_pb)).await;
                     action_results.push(r);
+                    main_pb.inc(1);
                     continue;
                 }
-            }
+        }
+
             if !action.can_be_run() {
                 continue;
             }
@@ -358,18 +422,14 @@ impl RunActionArgs {
                     })
                     .collect::<Vec<R>>(),
             );
+            main_pb.inc(1);
         } // end for
 
         // if expect run test check
         let last_results = action_results.last();
-        let last_action = actions.last().unwrap();
         let mut tests_is_success = vec![];
         if let Some(last_results) = last_results {
-            let expected = if self.expect.is_some() {
-                parse_cli_conf_to_map(self.expect.as_ref())
-            } else {
-                last_action.expected.clone()
-            };
+            let expected = parse_cli_conf_to_map(self.expect.as_ref());
             if let Some(expected) = &expected {
                 tests_is_success = TestChecker::new(last_results, &ctx, expected).check(
                     self.name.as_ref().map(|n| n.as_str()).unwrap_or("flow"),
@@ -379,7 +439,7 @@ impl RunActionArgs {
         }
 
         // finishing progress bar
-        main_pb.finish_and_clear();
+        main_pb.finish();
 
         let _ = self.save_if_needed(db, &self_clone).await;
         let _ = self.save_to_ts_if_needed(db, &self_clone).await;

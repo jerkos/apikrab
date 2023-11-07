@@ -23,7 +23,7 @@ pub struct AddActionArgs {
 
     /// maybe a static body
     #[arg(short, long)]
-    pub static_body: Option<String>,
+    pub static_body: Option<Vec<String>>,
 
     /// adding header separated by a :
     #[arg(short = 'H', long)]
@@ -48,6 +48,7 @@ impl AddActionArgs {
         r.url = Some(self.url.clone());
         r.verb = Some(self.verb.clone());
         r.header = self.header.clone();
+        r.body = self.static_body.clone();
         r.form_data = self.form_data;
         r.url_encoded = self.url_encoded;
 

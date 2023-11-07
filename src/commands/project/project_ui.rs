@@ -1,3 +1,4 @@
+use crate::DEFAULT_PROJECT;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::{Action, Project};
 use crate::ui::helpers::{Stateful, StatefulList};
@@ -7,6 +8,7 @@ use crossterm::event::{self};
 use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
+use std::collections::HashMap;
 use std::{io, thread};
 use tokio::runtime::Handle;
 use tui_textarea::{Input, Key};
@@ -88,7 +90,13 @@ impl<'a> ProjectUI<'a> {
                 .clone();
                 self_cloned
                     .db
-                    .get_actions(&selected_item.name)
+                    .get_actions(
+                        if selected_item.name == DEFAULT_PROJECT.name {
+                            None
+                        } else {
+                             Some(&selected_item.name)
+                        }
+                    )
                     .await
                     .unwrap()
             })
@@ -134,7 +142,7 @@ impl<'a> ProjectUI<'a> {
                 .map(|p| {
                     let mut conf_keys = p
                         .get_project_conf()
-                        .expect("Failed to get project conf")
+                        .unwrap_or(HashMap::new())
                         .keys()
                         .map(String::to_string)
                         .collect::<Vec<_>>();

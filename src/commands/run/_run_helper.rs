@@ -187,9 +187,15 @@ pub fn merge_with(run_actions_args: &RunActionArgs, o: &RunActionArgs) -> RunAct
     if o.header.is_some() {
         clone.header = o.header.clone();
     }
+
     if o.chain.is_some() {
         clone.chain = o.chain.clone();
+        /*
+        clone.chain = clone.chain.zip(o.chain.clone())
+        .map(|(mut v1, mut v2)| {v1.append(&mut v2); v1});
+        */
     }
+
     if o.name.is_some() {
         clone.name = o.name.clone();
     }

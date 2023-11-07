@@ -8,7 +8,7 @@ use crate::{
     commands::run::{
         _progress_bar::{add_progress_bar_for_request, finish_progress_bar},
         _run_helper::{
-            get_body, get_computed_urls, get_xtracted_path, is_anonymous_action, merge_with,
+            get_body, get_computed_urls, get_xtracted_path, is_anonymous_action,
         },
         action::RunActionArgs,
     },
@@ -27,15 +27,15 @@ use futures::future;
 use indicatif::MultiProgress;
 use itertools::Itertools;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub struct DomainAction {
-    name: String,
+    pub(crate) name: String,
     project_name: Option<String>,
     verb: String,
     headers: Option<HashMap<String, String>>,
     urls: HashSet<String>,
     query_params: Vec<Option<HashMap<String, String>>>,
-    body: Option<String>,
+    body: (Option<String>, bool, bool),
     pub(crate) extract_path: Option<HashMap<String, Option<String>>>,
     pub(crate) expected: Option<HashMap<String, String>>,
     pub(crate) run_action_args: Option<RunActionArgs>,
@@ -57,7 +57,7 @@ impl DomainAction {
             id: None,
             action_name: self.name.clone(),
             url: computed_url.to_string(),
-            body: self.body.as_ref().map(|s| s.to_string()),
+            body: self.body.0.as_ref().map(|s| s.to_string()),
             headers: Some(serde_json::to_string(&self.headers).unwrap()),
             response: f.map(|r| r.response.clone()).ok(),
             status_code: f.map(|r| r.status).unwrap_or(0u16),
@@ -80,7 +80,7 @@ impl DomainAction {
     /// retrieve project from db
     /// return None if anonymous action
     /// return None if no project found
-    async fn project_from_db(action_name: &str, db: &DBHandler) -> Option<Project> {
+    pub async fn project_from_db(action_name: &str, db: &DBHandler) -> Option<Project> {
         if is_anonymous_action(action_name) {
             None
         } else {
@@ -95,19 +95,21 @@ impl DomainAction {
         }
     }
 
-    fn from_run_args_data(
+    pub fn from_run_args_data(
         action_name: &str,
         verb: &str,
         run_action_args_url: &str,
         header: &str,
-        body: &str,
+        body: (&str, bool, bool),
         xtract_path: &str,
         path_params: &str,
         query_params: &str,
         expected: Option<&Vec<String>>,
         project: Option<&Project>,
+        run_action_args: Option<RunActionArgs>,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
+
         DomainAction {
             name: action_name.to_string(),
             project_name: None,
@@ -119,7 +121,7 @@ impl DomainAction {
                 run_action_args_url,
                 ctx,
             ),
-            body: get_body(body, None, None, ctx).map(|b| b.into_owned()),
+            body: (get_body(body.0, None, None, ctx).map(|b| b.into_owned()), body.1, body.2),
             query_params: parse_multiple_conf_as_opt_with_grouping_and_interpolation(
                 query_params,
                 &ctx,
@@ -127,54 +129,8 @@ impl DomainAction {
             ),
             extract_path: get_xtracted_path(&xtract_path, true, &ctx),
             expected: parse_cli_conf_to_map(expected),
-            run_action_args: None,
+            run_action_args,
         }
-    }
-
-    /// perform the merge between cli args and db args
-    pub async fn from_run_args(
-        run_action_args: &mut RunActionArgs,
-        db: &DBHandler,
-        ctx: &HashMap<String, String>,
-    ) -> Vec<DomainAction> {
-        // run one action possibly which can be several chained action
-        // cli overrides action from db
-        let mut actions = vec![];
-        let mut merged = if let Some(action_name) = run_action_args.name.as_ref() {
-            let action = Self::action_from_db(action_name, db).await;
-            let run_args_from_db = action
-                .unwrap()
-                .get_run_action_args()
-                .expect("Error loading action");
-            merge_with(&run_args_from_db, run_action_args)
-        } else {
-            run_action_args.clone()
-        };
-        let merged_clone = merged.clone();
-        let _ = merged.prepare();
-        for (action_name, header, body, xtract_path, path_params, query_params) in
-            merged.get_infos().into_iter()
-        {
-            let project = Self::project_from_db(action_name, db).await;
-            let mut domain_action = Self::from_run_args_data(
-                action_name,
-                merged.verb.as_ref().expect("No verb defined !").as_str(),
-                merged.url.as_ref().expect("No url defined !").as_str(),
-                header,
-                body,
-                xtract_path,
-                path_params,
-                query_params,
-                merged.expect.as_ref(),
-                project.as_ref(),
-                ctx,
-            );
-            domain_action.run_action_args = Some(merged_clone.clone());
-
-            actions.push(domain_action);
-        }
-
-        actions
     }
 
     pub async fn run(
@@ -204,10 +160,9 @@ impl DomainAction {
                             &self.verb,
                             self.headers.as_ref().unwrap_or(&HashMap::new()),
                             query_params.as_ref(),
-                            self.body.as_ref().map(|v| Cow::from(v)),
+                            (self.body.0.as_ref().map(|v| Cow::from(v)), self.body.1, self.body.2),
                         )
                         .await;
-
                     // save history line, let it silent if it fails
                     let _ = self
                         .insert_history_line(computed_url, fetch_result.as_ref(), db)

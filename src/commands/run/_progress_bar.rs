@@ -3,7 +3,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::http::FetchResult;
 
-fn new_pb(step_count: u64) -> ProgressBar {
+/// Create a new progress bar with custom style
+pub fn new_pb(step_count: u64) -> ProgressBar {
     ProgressBar::new(step_count).with_style(
         ProgressStyle::default_bar()
             .template("{spinner} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
