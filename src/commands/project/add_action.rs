@@ -56,9 +56,7 @@ impl AddActionArgs {
 
         let r = db_handler.upsert_action(&action).await;
         match r {
-            Ok(_) => println!(
-                "Action {} saved", self.name.clone().green()
-            ),
+            Ok(_) => println!("Action {} saved", self.name.clone().green()),
             Err(e) => println!("Error saving flow {}", e),
         }
         Ok(())

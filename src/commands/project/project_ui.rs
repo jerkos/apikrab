@@ -482,9 +482,15 @@ impl UIRunner for ProjectUI<'_> {
                     } => return Ok(true),
                     _ => {}
                 },
-                _ =>  if let Input {key: Key::Char('q'), ..} = input {
-                    return Ok(true)
-                },
+                _ => {
+                    if let Input {
+                        key: Key::Char('q'),
+                        ..
+                    } = input
+                    {
+                        return Ok(true);
+                    }
+                }
             },
         }
 

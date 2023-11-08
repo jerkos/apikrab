@@ -18,6 +18,9 @@ pub struct Run {
 
 #[derive(Subcommand)]
 pub enum RunCommands {
+    /// get
+    #[command(alias = "GET")]
+    Get(Box<RunActionArgs>),
     /// Run an action
     Action(Box<RunActionArgs>),
     /// Run a saved test suite

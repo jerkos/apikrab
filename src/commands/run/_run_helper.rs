@@ -1,3 +1,5 @@
+use crossterm::style::Stylize;
+
 use crate::utils::{
     parse_multiple_conf, parse_multiple_conf_as_opt_with_grouping_and_interpolation,
     parse_multiple_conf_with_opt, replace_with_conf, Interpol,
@@ -32,7 +34,7 @@ pub(crate) fn check_input(run_action_args: &RunActionArgs) -> anyhow::Result<()>
         }
     }
     if !err.is_empty() {
-        anyhow::bail!(err.join("\n"));
+        anyhow::bail!(err.join("\n").dark_red());
     }
     Ok(())
 }
@@ -82,6 +84,21 @@ pub fn get_body<'a>(body: &'a str, ctx: &HashMap<String, String>) -> Option<Cow<
     }
 }
 
+/// complete an url with http if not present
+fn complete_url(url: &str) -> Cow<str> {
+    if url.starts_with("http") {
+        return Cow::Borrowed(url);
+    }
+    Cow::Owned(format!("http://localhost{}", url))
+}
+
+fn get_full_url<'a>(project_url: Option<&'a str>, action_url: &'a str) -> Cow<'a, str> {
+    match project_url {
+        Some(main_url) => Cow::Owned(format!("{}/{}", complete_url(main_url), action_url)),
+        None => complete_url(action_url),
+    }
+}
+
 /// Compute several url given path params
 /// using the cartesian product of all values
 /// te generate all possible urls
@@ -91,10 +108,7 @@ pub fn get_computed_urls(
     action_url: &str,
     ctx: &HashMap<String, String>,
 ) -> HashSet<String> {
-    let full_url = match project_url {
-        Some(main_url) => format!("{}/{}", main_url, action_url),
-        None => action_url.to_string(),
-    };
+    let full_url = get_full_url(project_url, action_url).into_owned();
 
     // returning url with no interpolation
     // to be checked later

@@ -9,6 +9,7 @@ use crate::http::FetchResult;
 use crate::utils::{parse_cli_conf_to_map, val_or_join, SEP, SINGLE_INTERPOL_START};
 use clap::Args;
 use core::panic;
+use std::process::exit;
 use crossterm::style::Stylize;
 use indicatif::{MultiProgress, ProgressBar};
 use itertools::Itertools;
@@ -43,7 +44,6 @@ impl CurrentActionData<'_> {
         project: Option<&Project>,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
-
         DomainAction::from_current_action_data(
             self.name,
             run_action_args
@@ -169,10 +169,8 @@ impl RunActionArgs {
         if let Some(last_results) = last_results {
             let expected = parse_cli_conf_to_map(self.expect.as_ref());
             if let Some(expected) = &expected {
-                tests_is_success = TestChecker::new(last_results, ctx, expected).check(
-                    self.name.as_deref().unwrap_or("flow"),
-                    main_pb,
-                );
+                tests_is_success = TestChecker::new(last_results, ctx, expected)
+                    .check(self.name.as_deref().unwrap_or("flow"), main_pb);
             }
         }
         tests_is_success
@@ -277,7 +275,8 @@ impl RunActionArgs {
                     Some(data_vec) => {
                         if !is_chained_cmd {
                             if data_vec.len() > 1 {
-                                let contains_acc = data_vec.iter().any(|s| s.contains(SINGLE_INTERPOL_START));
+                                let contains_acc =
+                                    data_vec.iter().any(|s| s.contains(SINGLE_INTERPOL_START));
                                 if contains_acc {
                                     anyhow::bail!(
                                         "Chain, body and extract path must have the same length"
@@ -369,7 +368,7 @@ impl RunActionArgs {
         // check input and return an error if needed
         if let Err(msg) = check_input(self) {
             eprintln!("{}", msg);
-            panic!("Invalid input");
+            exit(1);
         }
 
         // creating a new context hashmap for storing extracted values

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use crate::commands::history::{History, HistoryCommands};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+use commands::run;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
@@ -105,6 +106,13 @@ async fn main() -> anyhow::Result<()> {
                 test_suite_args
                     .run_test_suite(&requester, &db_handler)
                     .await?;
+            },
+            RunCommands::Get(run_action_args) => {
+                run_action_args.verb = Some("GET".to_string());
+                let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
+                let _ = run_action_args
+                    .run_action(&requester, &db_handler, None, None)
+                    .await;
             }
         },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {

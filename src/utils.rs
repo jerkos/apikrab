@@ -10,7 +10,6 @@ const SINGLE_INTERPOL_END: char = '}';
 const MULTI_INTERPOL_START: &str = "{{";
 const MULTI_INTERPOL_END: &str = "}}";
 
-
 pub const SEP: &str = ",,";
 
 #[derive(Debug, Clone, Copy)]
@@ -93,10 +92,12 @@ pub fn replace_with_conf<'a>(
 /// Parse a configuration key: str, val: str from a vec of str to a hashmap
 /// Used to parse cli commands
 pub fn parse_cli_conf_to_map(conf: Option<&Vec<String>>) -> Option<HashMap<String, String>> {
-     conf.map(|conf| conf.iter()
-                 .map(|s| s.split(':').collect::<Vec<_>>())
-                                  .map(|v| (v[0].to_string(), v[1..].join(":")))
-                 .collect())
+    conf.map(|conf| {
+        conf.iter()
+            .map(|s| s.split(':').collect::<Vec<_>>())
+            .map(|v| (v[0].to_string(), v[1..].join(":")))
+            .collect()
+    })
 }
 
 /// Parse a configuration key: str, val: str from a vec of str to a hashmap
@@ -135,7 +136,7 @@ pub fn parse_multiple_conf(conf: &str) -> HashMap<String, String> {
 
 /// only for extracted path
 /// it is not json for sure
-pub fn parse_multiple_conf_with_opt(conf: & str) -> HashMap<String, Option<String>> {
+pub fn parse_multiple_conf_with_opt(conf: &str) -> HashMap<String, Option<String>> {
     let closure = |v: Option<String>| v;
     _parse_multiple_conf(conf, closure)
 }
