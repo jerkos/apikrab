@@ -14,8 +14,13 @@ impl ProjectInfoArgs {
         println!("{}\n", project);
 
         println!("{}", "Actions:".to_string().red().underline());
-        let actions = db_handler.get_actions(
-            if self.name.is_empty() { Some(&self.name) } else {None}).await?;
+        let actions = db_handler
+            .get_actions(if self.name.is_empty() {
+                Some(&self.name)
+            } else {
+                None
+            })
+            .await?;
         actions
             .iter()
             .enumerate()

@@ -2,15 +2,15 @@ use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
 use crate::commands::run::_run_helper::check_input;
 use crate::db::db_handler::DBHandler;
-use crate::db::dto::{Action, TestSuiteInstance, TestSuite};
+use crate::db::dto::{Action, Context, Project, TestSuite, TestSuiteInstance};
 use crate::domain::DomainAction;
-use crate::{http, main};
+use crate::http;
 use crate::http::FetchResult;
-use crate::utils::{parse_cli_conf_to_map, val_or_join};
+use crate::utils::{parse_cli_conf_to_map, val_or_join, SEP, SINGLE_INTERPOL_START};
 use clap::Args;
 use core::panic;
 use crossterm::style::Stylize;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
@@ -18,13 +18,58 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use super::_progress_bar::new_pb;
-use super::_run_helper::merge_with;
+use super::_run_helper::{is_anonymous_action, merge_with};
 use super::_test_checker::TestChecker;
 
 pub struct R {
     pub url: String,
     pub result: anyhow::Result<FetchResult>,
     pub ctx: HashMap<String, String>,
+}
+
+pub struct CurrentActionData<'a> {
+    name: &'a str,
+    header: &'a str,
+    body: &'a str,
+    xtract_path: &'a str,
+    path_params: &'a str,
+    query_params: &'a str,
+}
+
+impl CurrentActionData<'_> {
+    pub fn to_domain_action(
+        &self,
+        run_action_args: &RunActionArgs,
+        project: Option<&Project>,
+        ctx: &HashMap<String, String>,
+    ) -> DomainAction {
+
+        DomainAction::from_current_action_data(
+            self.name,
+            run_action_args
+                .verb
+                .as_ref()
+                .expect("No verb defined !")
+                .as_str(),
+            run_action_args
+                .url
+                .as_ref()
+                .expect("No url defined !")
+                .as_str(),
+            val_or_join(self.header, run_action_args.header.as_ref()).as_ref(),
+            (
+                self.body,
+                run_action_args.url_encoded,
+                run_action_args.form_data,
+            ),
+            val_or_join(self.xtract_path, run_action_args.extract_path.as_ref()).as_ref(),
+            val_or_join(self.path_params, run_action_args.path_params.as_ref()).as_ref(),
+            val_or_join(self.query_params, run_action_args.query_params.as_ref()).as_ref(),
+            project,
+            None,
+            ctx,
+        )
+    }
 }
 
 #[derive(Args, Serialize, Deserialize, Debug, Clone, Default)]
@@ -82,10 +127,6 @@ pub struct RunActionArgs {
     #[arg(long)]
     pub(crate) save: Option<String>,
 
-    /// save action to project of form action_name:project_name
-    //#[arg(long)]
-    //pub(crate) save_to_project: Option<String>,
-
     /// save result in the clipboard
     #[arg(long)]
     #[serde(default)]
@@ -105,7 +146,7 @@ pub struct RunActionArgs {
     pub grep: bool,
 
     /// do not check ssl certificate
-    #[arg(short='k', long)]
+    #[arg(short = 'k', long)]
     #[serde(default)]
     pub(crate) insecure: bool,
 
@@ -113,15 +154,28 @@ pub struct RunActionArgs {
     #[arg(short, long)]
     #[serde(default)]
     pub(crate) timeout: Option<u64>,
-
 }
 
 impl RunActionArgs {
-    pub fn header_as_str(&self) -> Option<String> {
-        match self.header.as_ref() {
-            Some(h) => Some(h.iter().filter(|v| !v.is_empty()).join(",")),
-            None => None,
+    pub async fn run_test_if_needed(
+        &self,
+        action_results: &[Vec<R>],
+        ctx: &HashMap<String, String>,
+        main_pb: &ProgressBar,
+    ) -> Vec<bool> {
+        // if expect run test check
+        let last_results = action_results.last();
+        let mut tests_is_success = vec![];
+        if let Some(last_results) = last_results {
+            let expected = parse_cli_conf_to_map(self.expect.as_ref());
+            if let Some(expected) = &expected {
+                tests_is_success = TestChecker::new(last_results, ctx, expected).check(
+                    self.name.as_deref().unwrap_or("flow"),
+                    main_pb,
+                );
+            }
         }
+        tests_is_success
     }
 
     pub async fn save_if_needed(
@@ -169,7 +223,7 @@ impl RunActionArgs {
                 let ts = TestSuite {
                     id: None,
                     name: ts_name.clone(),
-                    created_at: None
+                    created_at: None,
                 };
                 db.upsert_test_suite(&ts).await?;
                 // add test instance
@@ -183,7 +237,7 @@ impl RunActionArgs {
                     })
                     .await;
                 match &r {
-                    Ok(_) => println!("{}", format!("Test saved in {}", ts_name.clone().green())),
+                    Ok(_) => println!("Test saved in {}", ts_name.clone().green()),
                     Err(e) => println!("Error saving test {}", e),
                 }
                 r
@@ -223,14 +277,14 @@ impl RunActionArgs {
                     Some(data_vec) => {
                         if !is_chained_cmd {
                             if data_vec.len() > 1 {
-                                let contains_acc = data_vec.iter().any(|s| s.contains('{'));
+                                let contains_acc = data_vec.iter().any(|s| s.contains(SINGLE_INTERPOL_START));
                                 if contains_acc {
                                     anyhow::bail!(
                                         "Chain, body and extract path must have the same length"
                                     );
                                 }
                             }
-                            let merged_data = data_vec.join(",");
+                            let merged_data = data_vec.join(SEP);
                             **v = Some(vec![merged_data]);
                         }
                     }
@@ -273,30 +327,29 @@ impl RunActionArgs {
         Ok(())
     }
 
-    pub fn get_infos(&self) -> Vec<(&String, &String, &String, &String, &String, &String)> {
+    pub fn get_action_data(&self) -> Vec<CurrentActionData> {
         // check input and return an error if needed
-        if let Err(msg) = check_input(&self) {
+        if let Err(msg) = check_input(self) {
             eprintln!("{}", msg);
             panic!("Invalid input");
         }
         // check if action is chained
         itertools::izip!(
-            self.chain.as_ref().map(|c| c.into_iter()).unwrap(),
-            self.header.as_ref().expect("Internal error").into_iter(),
-            self.body.as_ref().expect("Internal error").into_iter(),
-            self.extract_path
-                .as_ref()
-                .expect("Internal error")
-                .into_iter(),
-            self.path_params
-                .as_ref()
-                .expect("Internal error")
-                .into_iter(),
-            self.query_params
-                .as_ref()
-                .expect("Internal error")
-                .into_iter(),
+            self.chain.as_ref().map(|c| c.iter()).unwrap(),
+            self.header.as_ref().unwrap().iter(),
+            self.body.as_ref().unwrap().iter(),
+            self.extract_path.as_ref().unwrap().iter(),
+            self.path_params.as_ref().unwrap().iter(),
+            self.query_params.as_ref().unwrap().iter(),
         )
+        .map(|d| CurrentActionData {
+            name: d.0,
+            header: d.1,
+            body: d.2,
+            xtract_path: d.3,
+            path_params: d.4,
+            query_params: d.5,
+        })
         .collect_vec()
     }
 
@@ -307,14 +360,14 @@ impl RunActionArgs {
         http: &'a http::Api,
         db: &'a DBHandler,
         multi: Option<&'a MultiProgress>,
-        pb: Option<& 'a ProgressBar>,
+        pb: Option<&'a ProgressBar>,
     ) -> (Vec<R>, Vec<bool>) {
         // make a clone a the beginning as we mutate
         // this instance latter in prepare method
         let self_clone = self.clone();
 
         // check input and return an error if needed
-        if let Err(msg) = check_input(&self) {
+        if let Err(msg) = check_input(self) {
             eprintln!("{}", msg);
             panic!("Invalid input");
         }
@@ -332,9 +385,9 @@ impl RunActionArgs {
 
         // main progress bar
         let main_pb = pb.cloned().unwrap_or_else(|| {
-            let main_pb = multi_bar.add(
-                new_pb((self.chain.as_ref().map(|c| c.len()).unwrap_or(0) + 1) as u64)
-            );
+            let main_pb = multi_bar.add(new_pb(
+                (self.chain.as_ref().map(|c| c.len()).unwrap_or(0) + 1) as u64,
+            ));
             main_pb.enable_steady_tick(Duration::from_millis(100));
             main_pb
         });
@@ -345,20 +398,19 @@ impl RunActionArgs {
         let _ = self.prepare();
 
         // iterating over actions in current actions
-        for action_data in self.get_infos().into_iter() {
-            let (
-                action_name,
-                action_header,
-                action_body,
-                xtract_path,
-                path_params,
-                query_params
-            ) = action_data;
-
+        for current_action_data in self.get_action_data().into_iter() {
             // retrieve action from db if needed
             let (action, project) = (
-                db.get_action(&action_name).await.ok(),
-                DomainAction::project_from_db(action_name, db).await
+                db.get_action(current_action_data.name).await.ok(),
+                DomainAction::project_from_db(current_action_data.name, db).await,
+            );
+
+            // extend configuration if necessary
+            ctx.extend(
+                project
+                    .as_ref()
+                    .and_then(|p| p.get_project_conf().ok())
+                    .unwrap_or(HashMap::new()),
             );
 
             // retrieve run action args
@@ -367,41 +419,32 @@ impl RunActionArgs {
                 .map(|a| a.get_run_action_args().expect("Error loading action"))
                 .unwrap_or(self.clone());
 
-            // println!("{:?}", run_action_args_ac);
-            // println!("path params {:?} {:?}", path_params, val_or_join(path_params, run_action_args_ac.path_params.as_ref()).as_ref());
-            let mut action = DomainAction::from_run_args_data(
-                action_name,
-                run_action_args_ac.verb.as_ref().expect("No verb defined !").as_str(),
-                run_action_args_ac.url.as_ref().expect("No url defined !").as_str(),
-                val_or_join(action_header, run_action_args_ac.header.as_ref()).as_ref(),
-                (action_body, run_action_args_ac.url_encoded, run_action_args_ac.form_data),
-                val_or_join(xtract_path, run_action_args_ac.extract_path.as_ref()).as_ref(),
-                val_or_join(path_params, run_action_args_ac.path_params.as_ref()).as_ref(),
-                val_or_join(query_params, run_action_args_ac.query_params.as_ref()).as_ref(),
-                self.expect.as_ref(),
-                project.as_ref(),
-                None,
-                &ctx,
-            );
-            action.run_action_args = Some(run_action_args_ac);
+            let mut runnable_action =
+                current_action_data.to_domain_action(&run_action_args_ac, project.as_ref(), &ctx);
+            runnable_action.run_action_args = Some(run_action_args_ac);
 
-            //println!("{:?}", action);
-            if let Some(run_action_args) = action.run_action_args.as_mut() {
-                if action.name != "UNKNOWN" && run_action_args.chain.is_some() {
+            if let Some(run_action_args) = runnable_action.run_action_args.as_mut() {
+                if !is_anonymous_action(&runnable_action.name) && run_action_args.chain.is_some() {
+                    // inherit some sane configuration
                     run_action_args.save = None;
-                    let (r, _) = run_action_args.run_action(http, db, Some(&multi_bar), Some(&main_pb)).await;
+                    run_action_args.save_to_ts = None;
+                    run_action_args.quiet = self.quiet;
+                    run_action_args.grep = self.grep;
+                    let (r, _) = run_action_args
+                        .run_action(http, db, Some(&multi_bar), Some(&main_pb))
+                        .await;
                     action_results.push(r);
                     main_pb.inc(1);
                     continue;
                 }
-        }
+            }
 
-            if !action.can_be_run() {
+            if !runnable_action.can_be_run() {
                 continue;
             }
             action_results.push(
-                action
-                    .run(db, http, &mut ctx, &multi_bar)
+                runnable_action
+                    .run(action.as_ref(), db, http, &multi_bar)
                     .await
                     .into_iter()
                     .map(|(url, result)| {
@@ -410,12 +453,12 @@ impl RunActionArgs {
                             printer: &mut printer,
                         }
                         .handle_result(
-                            action.extract_path.as_ref(),
+                            runnable_action.extract_path.as_ref(),
                             &mut ctx,
                             &main_pb,
                         );
                         R {
-                            url: url.to_string(),
+                            url,
                             result,
                             ctx: ctx.clone(),
                         }
@@ -425,18 +468,20 @@ impl RunActionArgs {
             main_pb.inc(1);
         } // end for
 
-        // if expect run test check
-        let last_results = action_results.last();
-        let mut tests_is_success = vec![];
-        if let Some(last_results) = last_results {
-            let expected = parse_cli_conf_to_map(self.expect.as_ref());
-            if let Some(expected) = &expected {
-                tests_is_success = TestChecker::new(last_results, &ctx, expected).check(
-                    self.name.as_ref().map(|n| n.as_str()).unwrap_or("flow"),
-                    &main_pb,
-                );
-            }
+        // saving current session context
+        if db
+            .insert_conf(&Context {
+                value: serde_json::to_string(&ctx).expect("Error serializing context"),
+            })
+            .await
+            .is_err()
+        {
+            main_pb.println("Error inserting context");
         }
+        // if expect run test check
+        let test_results = self
+            .run_test_if_needed(&action_results, &ctx, &main_pb)
+            .await;
 
         // finishing progress bar
         main_pb.finish();
@@ -446,132 +491,10 @@ impl RunActionArgs {
 
         (
             action_results.into_iter().flatten().collect_vec(),
-            tests_is_success,
+            test_results,
         )
 
         /*
-            // deals with configuration
-            ctx.extend(project
-                .as_ref()
-                .map(|p| p.get_project_conf().ok())
-                .flatten()
-                .unwrap_or(HashMap::new()));
-
-            // try to find a project url
-            let main_project_url = project.as_ref().map(|p| p.main_url.as_str());
-
-            // check if it can be run
-            let mut can_be_ran = true;
-
-            if computed_urls.len() == 1 && computed_urls.iter().next().unwrap().contains('{') {
-                can_be_ran = false;
-            }
-
-            // compute body
-            let body = get_body(
-                action_body,
-                action.as_ref().and_then(|a| a.static_body.as_deref()),
-                action.as_ref().and_then(|a| a.body_example.as_deref()),
-                &ctx,
-            );
-
-            if let Some(b) = body.as_ref() {
-                if b.contains("{{") {
-                    can_be_ran = false;
-                }
-            }
-
-            // compute headers
-            let computed_headers = get_str_as_interpolated_map(
-                action.as_ref().map(|a| a.headers.as_str()).unwrap_or("{}"),
-                &ctx,
-                Interpol::MultiInterpol,
-            )
-            .unwrap_or_else(|| {
-                let headers_from_cli = parse_cli_conf_to_map(self.header.as_ref());
-                headers_from_cli
-                    .into_iter()
-                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                    .collect()
-            });
-
-            if computed_headers.values().any(|v| v.contains("{{")) {
-                can_be_ran = false;
-            }
-
-            // all possible query params
-            let computed_query_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(
-                query_params,
-                &ctx,
-                Interpol::MultiInterpol,
-            );
-
-            if computed_query_params
-                .iter()
-                .filter_map(|opt| opt.as_ref().map(|vv| vv.values().any(|v| v.contains("{{"))))
-                .any(|v| v)
-            {
-                can_be_ran = false
-            }
-
-            if can_be_ran {
-                // run in concurrent mod
-                let fetch_results = future::join_all(
-                    computed_urls
-                        .iter()
-                        .cartesian_product(computed_query_params)
-                        .map(|(computed_url, query_params)| {
-                            // clone needed variables
-                            let extended_ctx = ctx.clone();
-                            let mut action = action.clone();
-                            let computed_headers = computed_headers.clone();
-                            let body = body.clone();
-
-                            let action_verb = action
-                                .as_ref()
-                                .map(|a| a.verb.clone())
-                                .unwrap_or_else(|| self.verb.clone().unwrap());
-                            // creating a progress bar for the current request
-                            let pb = Self::add_progress_bar_for_request(
-                                &multi_bar,
-                                &action_verb,
-                                computed_url,
-                                query_params.as_ref(),
-                            );
-
-                            async move {
-                                // fetch api
-                                let fetch_result = http
-                                    .fetch(
-                                        computed_url,
-                                        &action_verb,
-                                        &computed_headers,
-                                        query_params.as_ref(),
-                                        body.as_ref(),
-                                    )
-                                    .await;
-
-                                // save history line
-                                let fetch_result_ref = fetch_result.as_ref();
-                                let _ = db
-                                    .insert_history(&History {
-                                        id: None,
-                                        action_name: action_name.to_string(),
-                                        url: computed_url.to_string(),
-                                        body: body.as_ref().map(|s| s.to_string()),
-                                        headers: Some(
-                                            serde_json::to_string(&computed_headers).unwrap(),
-                                        ),
-                                        response: fetch_result_ref.map(|r| r.response.clone()).ok(),
-                                        status_code: fetch_result_ref
-                                            .map(|r| r.status)
-                                            .unwrap_or(0u16),
-                                        duration: fetch_result_ref
-                                            .map(|r| r.duration.as_secs_f32())
-                                            .unwrap_or(0f32),
-                                        timestamp: None,
-                                    })
-                                    .await;
 
                                 // upsert action if success
                                 if let Ok(FetchResult {
@@ -590,83 +513,6 @@ impl RunActionArgs {
                                         }
                                     }
                                 }
-
-                                // upsert ctx
-                                if db
-                                    .insert_conf(&Context {
-                                        value: serde_json::to_string(&extended_ctx)
-                                            .expect("Error serializing context"),
-                                    })
-                                    .await
-                                    .is_err()
-                                {
-                                    pb.println("Error inserting context");
-                                }
-
-                                // finish current pb
-                                Self::finish_progress_bar(
-                                    &pb,
-                                    fetch_result.as_ref(),
-                                    &action_verb,
-                                    computed_url,
-                                    query_params.as_ref(),
-                                );
-
-                                // returning mixed of result etc...
-                                (get_full_url(computed_url, query_params.as_ref()), fetch_result)
-                            }
-                        }),
-                )
-                .await;
-
-
-                // parse extracted path from cli
-                let xtracted_path = get_xtracted_path(xtract_path, self.force, &ctx);
-
-                for action_result in fetch_results {
-                    // handle result and print extracted data
-                    let _ = HttpResult::new(&action_result.1, &mut printer).handle_result(
-                        xtracted_path.as_ref(),
-                        &mut ctx,
-                        &main_pb,
-                    );
-                    action_results.push(
-                        R {
-                        url: action_result.0,
-                        result: action_result.1,
-                        ctx: ctx.clone(),
-                    });
-                }
-
-                // increment the main progress bar
-                main_pb.inc(1);
-            }
-        }
-
-        // save as requested
-        if let Some(ts_name) = &self.save_to_ts {
-            // ensuring test suite exists
-            db.upsert_test_suite(ts_name).await?;
-            // add test instance
-            let r = db.upsert_test_suite_instance(&TestSuiteInstance {
-                id: None,
-                test_suite_name: ts_name.clone(),
-                action: to_string(&self_clone).unwrap(),
-            }).await;
-            match r {
-                Ok(_) => main_pb.println(format!("{}", format!("Test saved in {}", ts_name.clone().green()))),
-                Err(e) => main_pb.println(format!("Error saving test {}", e))
-            }
-        }
-
-        // save to flow
-        if let Some(flow_name) = &self.save_to_flow {
-            let r = db.upsert_flow(flow_name, &self_clone).await;
-            match r {
-                Ok(_) => main_pb.println(format!("{}", format!("Flow {} saved", flow_name.clone().green()))),
-                Err(e) => main_pb.println(format!("Error saving flow {}", e))
-            }
-        }
         */
     }
 }

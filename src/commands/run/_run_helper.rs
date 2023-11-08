@@ -25,12 +25,11 @@ pub(crate) fn check_input(run_action_args: &RunActionArgs) -> anyhow::Result<()>
         err.push("Cannot save to flow and test suite at the same time");
     }
     let tuple = (run_action_args.verb.as_ref(), run_action_args.url.as_ref());
-    match run_action_args.name.as_ref() {
-        None => match tuple {
+    if run_action_args.name.as_ref().is_none() {
+        match tuple {
             (Some(_), Some(_)) => {}
             _ => err.push("Verb and url are required"),
-        },
-        _ => {}
+        }
     }
     if !err.is_empty() {
         anyhow::bail!(err.join("\n"));
@@ -39,8 +38,6 @@ pub(crate) fn check_input(run_action_args: &RunActionArgs) -> anyhow::Result<()>
 }
 
 pub enum BodyType<'bt> {
-    Static(&'bt str),
-    LastSuccessfulBody(&'bt str),
     Empty,
     Default(&'bt str),
 }
@@ -49,8 +46,6 @@ impl<'bt> From<&'bt str> for BodyType<'bt> {
     fn from(s: &'bt str) -> BodyType<'bt> {
         match s {
             "" => BodyType::Empty,
-            "LAST_SUCCESSFUL_BODY" => BodyType::LastSuccessfulBody(s),
-            "STATIC" => BodyType::Static(s),
             _ => BodyType::Default(s),
         }
     }
@@ -68,24 +63,18 @@ fn _get_body<'a>(str: &str, interpolated_body: Cow<'a, str>, body: &str) -> Opti
 }
 
 /// Body interpolation
-/// Some magical values exists e.g. LAST_SUCCESSFUL_BODY, STATIC
-pub fn get_body<'a>(
-    body: &'a str,
-    static_body: Option<&'a str>,
-    body_example: Option<&'a str>,
-    ctx: &HashMap<String, String>,
-) -> Option<Cow<'a, str>> {
+pub fn get_body<'a>(body: &'a str, ctx: &HashMap<String, String>) -> Option<Cow<'a, str>> {
     let interpolated_body = replace_with_conf(body, ctx, Interpol::MultiInterpol);
 
     match &interpolated_body {
         // if static body exists, use it otherwise None is used
-        Cow::Borrowed(str) => {
-            let body_type: BodyType = (*str).into();
+        Cow::Borrowed(body_as_str) => {
+            let body_type: BodyType = (*body_as_str).into();
             match body_type {
                 BodyType::Empty => None,
-                BodyType::Static(_) => Some(Cow::Borrowed(static_body.as_ref()?)),
-                BodyType::LastSuccessfulBody(_) => Some(Cow::Borrowed(body_example.as_ref()?)),
-                BodyType::Default(str) => _get_body(str, interpolated_body.clone(), body),
+                BodyType::Default(default_body_as_str) => {
+                    _get_body(default_body_as_str, interpolated_body.clone(), body)
+                }
             }
         }
         // body had some interpolated value

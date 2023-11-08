@@ -70,15 +70,17 @@ static PROJECT_NOT_FOUND: &str =
     "Project not found. Did you forget to create it running `apikrab project new <project_name>`?";
 static CONNECTION_ERROR: &str = "Connection to database failed";
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DBHandler {
     pub conn: Option<SqlitePool>,
 }
 
 impl DBHandler {
+    /*
     pub fn new() -> Self {
         Self { conn: None }
     }
+    */
 
     fn get_conn(&self) -> &SqlitePool {
         self.conn
@@ -130,12 +132,12 @@ impl DBHandler {
             DO UPDATE SET main_url = ?3, conf = ?4, updated_at = CURRENT_TIMESTAMP;
             "#,
         )
-        .bind(&project.id)
+        .bind(project.id)
         .bind(&project.name)
         .bind(&project.main_url)
         .bind(&project.conf)
-        .bind(&project.created_at)
-        .bind(&project.updated_at)
+        .bind(project.created_at)
+        .bind(project.updated_at)
         .execute(self.get_conn())
         .await?
         .last_insert_rowid();
@@ -171,7 +173,7 @@ impl DBHandler {
                 updated_at = CURRENT_TIMESTAMP;
             "#,
         )
-        .bind(&action.id)
+        .bind(action.id)
         .bind(&action.name)
         .bind(&action.run_action_args)
         .bind(&action.body_example)
@@ -189,12 +191,12 @@ impl DBHandler {
             Some(_) => {
                 format!("{} WHERE a.project_name = ?1", base)
             }
-            None => format!("{} WHERE a.project_name is NULL", base)
+            None => format!("{} WHERE a.project_name is NULL", base),
         };
         let actions = sqlx::query_as::<_, Action>(&request)
-        .bind(project_name)
-        .fetch_all(self.get_conn())
-        .await?;
+            .bind(project_name)
+            .fetch_all(self.get_conn())
+            .await?;
 
         Ok(actions)
     }
@@ -259,7 +261,7 @@ impl DBHandler {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
             "#,
         )
-        .bind(&history.id)
+        .bind(history.id)
         .bind(&history.action_name)
         .bind(&history.url)
         .bind(&history.body)
@@ -341,11 +343,11 @@ impl DBHandler {
             DO UPDATE SET run_action_args = ?3, updated_at = CURRENT_TIMESTAMP;
             "#,
         )
-        .bind(&test_suite_instance.id)
+        .bind(test_suite_instance.id)
         .bind(&test_suite_instance.test_suite_name)
         .bind(&test_suite_instance.run_action_args)
-        .bind(&test_suite_instance.created_at)
-        .bind(&test_suite_instance.updated_at)
+        .bind(test_suite_instance.created_at)
+        .bind(test_suite_instance.updated_at)
         .execute(self.get_conn())
         .await?
         .last_insert_rowid();

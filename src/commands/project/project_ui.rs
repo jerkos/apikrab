@@ -1,9 +1,9 @@
-use crate::DEFAULT_PROJECT;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::{Action, Project};
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
-use crate::utils::random_emoji;
+use crate::utils::{human_readable_date, random_emoji};
+use crate::DEFAULT_PROJECT;
 use crossterm::event::{self};
 use ratatui::backend::Backend;
 use ratatui::Frame;
@@ -90,13 +90,11 @@ impl<'a> ProjectUI<'a> {
                 .clone();
                 self_cloned
                     .db
-                    .get_actions(
-                        if selected_item.name == DEFAULT_PROJECT.name {
-                            None
-                        } else {
-                             Some(&selected_item.name)
-                        }
-                    )
+                    .get_actions(if selected_item.name == DEFAULT_PROJECT.name {
+                        None
+                    } else {
+                        Some(&selected_item.name)
+                    })
                     .await
                     .unwrap()
             })
@@ -242,6 +240,22 @@ impl<'a> ProjectUI<'a> {
                                 },
                                 Style::default().fg(Color::DarkGray),
                             ),
+                            Span::raw(" "),
+                            Span::styled(
+                                a.created_at
+                                    .as_ref()
+                                    .map(human_readable_date)
+                                    .unwrap_or("".to_string()),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(
+                                a.updated_at
+                                    .as_ref()
+                                    .map(human_readable_date)
+                                    .unwrap_or("".to_string()),
+                                Style::default().fg(Color::DarkGray),
+                            ),
                         ]),
                     ])
                 })
@@ -289,7 +303,7 @@ impl<'a> ProjectUI<'a> {
         .zip(vec![ActiveArea::BodyExample, ActiveArea::ResponseExample].iter())
         .for_each(|(text_area, area)| {
             let is_body_example = area == &ActiveArea::BodyExample;
-            text_area.as_mut().map(|t| {
+            if let Some(t) = text_area.as_mut() {
                 t.set_block(t.block().unwrap().clone().border_style(Style::default().fg(
                     if area == &self.active_area {
                         Color::Blue
@@ -325,7 +339,7 @@ impl<'a> ProjectUI<'a> {
                         }
                     }
                 }
-            });
+            };
             frame.render_widget(
                 text_area.as_mut().unwrap().widget(),
                 bottom_layout[if is_body_example { 0 } else { 1 }],
@@ -468,12 +482,8 @@ impl UIRunner for ProjectUI<'_> {
                     } => return Ok(true),
                     _ => {}
                 },
-                _ => match input {
-                    Input {
-                        key: Key::Char('q'),
-                        ..
-                    } => return Ok(true),
-                    _ => {}
+                _ =>  if let Input {key: Key::Char('q'), ..} = input {
+                    return Ok(true)
                 },
             },
         }

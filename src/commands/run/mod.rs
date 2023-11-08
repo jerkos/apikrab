@@ -19,7 +19,7 @@ pub struct Run {
 #[derive(Subcommand)]
 pub enum RunCommands {
     /// Run an action
-    Action(RunActionArgs),
+    Action(Box<RunActionArgs>),
     /// Run a saved test suite
     TestSuite(test_suite::TestSuiteArgs),
 }

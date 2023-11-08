@@ -21,7 +21,7 @@ pub fn init_progress_bars(step_count: u64) -> (MultiProgress, ProgressBar) {
 /// add a progress bar for the current request
 pub fn add_progress_bar_for_request(multi_bar: &MultiProgress, message: &str) -> ProgressBar {
     // creating a progress bar for the current request
-    let pb = multi_bar.add(
+    multi_bar.add(
         ProgressBar::new_spinner()
             .with_style(
                 ProgressStyle::with_template("{spinner:.blue} {msg}")
@@ -29,8 +29,7 @@ pub fn add_progress_bar_for_request(multi_bar: &MultiProgress, message: &str) ->
                     .tick_strings(&["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]),
             )
             .with_message(format!("Running {} ", message)),
-    );
-    pb
+    )
 }
 
 /// finish progress bar
@@ -39,7 +38,7 @@ pub fn finish_progress_bar(
     fetch_result: anyhow::Result<&FetchResult, &anyhow::Error>,
     message: &str,
 ) {
-pb.set_style(
+    pb.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {msg}")
             .unwrap(),

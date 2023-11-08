@@ -20,8 +20,8 @@ use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
 use crate::db::db_handler::DBHandler;
-use crate::ui::run_ui::UIRunner;
 use crate::db::dto::Project as DtoProject;
+use crate::ui::run_ui::UIRunner;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -49,20 +49,20 @@ enum Commands {
 
 lazy_static! {
     pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
-    pub static ref DEFAULT_PROJECT: DtoProject =  DtoProject {
-                    id: None,
-                    name: "DEFAULT".to_string(),
-                    main_url: "".to_string(),
-                    conf: None,
-                    created_at: None,
-                    updated_at: None
-                };
+    pub static ref DEFAULT_PROJECT: DtoProject = DtoProject {
+        id: None,
+        name: "DEFAULT".to_string(),
+        main_url: "".to_string(),
+        conf: None,
+        created_at: None,
+        updated_at: None
+    };
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // init database if needed
-    let mut db_handler = DBHandler::new();
+    let mut db_handler = DBHandler::default();
     db_handler.init_db().await?;
 
     // parse cli args

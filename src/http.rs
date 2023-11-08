@@ -28,10 +28,14 @@ impl Api {
     pub fn new(timeout: Option<u64>, disable_cert_validation: bool) -> Self {
         Self {
             client: reqwest::ClientBuilder::new()
-            .danger_accept_invalid_certs(disable_cert_validation)
-            .timeout(timeout.map(Duration::from_secs).unwrap_or(Duration::from_secs(10)))
-            .build()
-            .expect("Error building reqwest client")
+                .danger_accept_invalid_certs(disable_cert_validation)
+                .timeout(
+                    timeout
+                        .map(Duration::from_secs)
+                        .unwrap_or(Duration::from_secs(10)),
+                )
+                .build()
+                .expect("Error building reqwest client"),
         }
     }
 
@@ -70,7 +74,7 @@ impl Api {
         // body
         let is_url_encoded = body.1;
         let is_form_data = body.2;
-        let b =  body.0;
+        let b = body.0;
         builder = match (is_url_encoded, is_form_data) {
             (true, true) => panic!("Cannot have both url encoded and form data"),
             (false, false) => {
@@ -108,7 +112,6 @@ impl Api {
         // getting status and response
         let status = response.status();
         let text: String = response.text().await?;
-
         let fetch_result = FetchResult {
             response: text,
             status: status.as_u16(),

@@ -123,7 +123,7 @@ impl<'a> TestChecker<'a> {
                     check_r
                 }
                 Err(_) => {
-                    println!("   {} {} {}", "🦄 ??Checking...".red(), status_code, "❌");
+                    println!("   {} {} ❌", "🦄 ??Checking...".red(), status_code);
                     false
                 }
             };
