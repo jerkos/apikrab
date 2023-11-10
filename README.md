@@ -18,7 +18,7 @@ This tool may be used in different ways:
 > [!WARNING]
 > Tested on MacOs only
 
-> [!INFO]
+> [!IMPORTANT]
 > I am a newbie in Rust programming... If you take a look to the code be indulgent !
 
 ## Installation
