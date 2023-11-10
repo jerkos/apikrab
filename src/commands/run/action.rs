@@ -9,19 +9,20 @@ use crate::http::FetchResult;
 use crate::utils::{parse_cli_conf_to_map, val_or_join, SEP, SINGLE_INTERPOL_START};
 use clap::Args;
 use core::panic;
-use std::process::exit;
 use crossterm::style::Stylize;
 use indicatif::{MultiProgress, ProgressBar};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use std::collections::HashMap;
+use std::process::exit;
 use std::time::Duration;
 
 use super::_progress_bar::new_pb;
 use super::_run_helper::{is_anonymous_action, merge_with};
 use super::_test_checker::TestChecker;
 
+#[derive(Debug)]
 pub struct R {
     pub url: String,
     pub result: anyhow::Result<FetchResult>,
@@ -130,7 +131,7 @@ pub struct RunActionArgs {
     /// save result in the clipboard
     #[arg(long)]
     #[serde(default)]
-    clipboard: bool,
+    pub(crate) clipboard: bool,
 
     /// force action rerun even if its extracted value exists in current context
     #[arg(long)]
@@ -166,10 +167,10 @@ impl RunActionArgs {
         // if expect run test check
         let last_results = action_results.last();
         let mut tests_is_success = vec![];
-        if let Some(last_results) = last_results {
+        if let Some(lr) = last_results {
             let expected = parse_cli_conf_to_map(self.expect.as_ref());
-            if let Some(expected) = &expected {
-                tests_is_success = TestChecker::new(last_results, ctx, expected)
+            if let Some(ex) = &expected {
+                tests_is_success = TestChecker::new(lr, ctx, ex)
                     .check(self.name.as_deref().unwrap_or("flow"), main_pb);
             }
         }
@@ -492,26 +493,5 @@ impl RunActionArgs {
             action_results.into_iter().flatten().collect_vec(),
             test_results,
         )
-
-        /*
-
-                                // upsert action if success
-                                if let Ok(FetchResult {
-                                    response, status, ..
-                                }) = &fetch_result
-                                {
-                                    if let Some(action) = action.as_mut() {
-                                        if *status >= 200 && *status < 300 {
-                                            action.response_example = Some(response.clone());
-                                            action.body_example =
-                                                body.as_ref().map(|b| b.to_string());
-
-                                            if db.upsert_action(action).await.is_err() {
-                                                pb.println(format!("{}", "Error upserting action".red()));
-                                            }
-                                        }
-                                    }
-                                }
-        */
     }
 }

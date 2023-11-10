@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use crate::commands::history::{History, HistoryCommands};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use commands::run;
+use commands::run::action::RunActionArgs;
 use futures::StreamExt;
+use http::Verb;
 use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
 use sqlx::{Column, Executor, Row};
@@ -37,10 +38,13 @@ enum Commands {
     /// Create or update a new project with specified parameters
     Project(Project),
     /// Run a project action, flow or test suite
+    #[command(alias = "r")]
     Run(Run),
     /// Test suite information
+    #[command(alias = "ts")]
     TestSuite(TestSuite),
     /// List all history call
+    #[command(alias = "h")]
     History(History),
     /// Print the completion script in stdout
     PrintCompleteScript { shell: Shell },
@@ -58,6 +62,15 @@ lazy_static! {
         created_at: None,
         updated_at: None
     };
+}
+
+
+async fn run_wrapper(run_action_args: &mut Box<RunActionArgs>, v: Option<Verb>, db_handler: &DBHandler) {
+    let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
+    run_action_args.verb = v.map(|v| v.to_string());
+    let _ = run_action_args
+        .run_action(&requester, &db_handler, None, None)
+        .await;
 }
 
 #[tokio::main]
@@ -96,23 +109,25 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run(run) => match &mut run.run_commands {
             // init http requester
             RunCommands::Action(run_action_args) => {
-                let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
-                let _ = run_action_args
-                    .run_action(&requester, &db_handler, None, None)
-                    .await;
+                run_wrapper(run_action_args, None, &db_handler).await;
             }
             RunCommands::TestSuite(test_suite_args) => {
                 let requester = http::Api::new(Some(10), true);
                 test_suite_args
                     .run_test_suite(&requester, &db_handler)
                     .await?;
-            },
+            }
             RunCommands::Get(run_action_args) => {
-                run_action_args.verb = Some("GET".to_string());
-                let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
-                let _ = run_action_args
-                    .run_action(&requester, &db_handler, None, None)
-                    .await;
+                run_wrapper(run_action_args, Some(Verb::GET), &db_handler).await;
+            }
+            RunCommands::Post(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::POST), &db_handler).await;
+            }
+            RunCommands::Put(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::PUT), &db_handler).await;
+            }
+            RunCommands::Delete(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::DELETE), &db_handler).await;
             }
         },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {

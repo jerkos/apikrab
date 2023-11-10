@@ -6,45 +6,23 @@ CLI tools to manage your json api call in the terminal for fun only !
 
 ## Philosophy
 
+The goal of this project is to provide a simple tool to manage my json API calls in the
+terminal. It is made to answer my needs which may be not the same for you.
 
-# TL;DR
-> **You can create a project, add actions to it, run them, chain them, save them as flows, and
-> test them.**
+This tool may be used in different ways:
+ - to perform basic http call, providing a convenient CLI (but not as nice as HTTPie). Covers only essential features of
+ an http tool.
+ - performing project management with a collection of API calls (postman) and testing features
 
-
-The goal of this project is to provide a simple tool to manage your json api call in the
-terminal. It is still in very early stage of development and is not intended to be used in
-production.
-
-The first concept is the **project**. A project has a name and root urls for an api to test, and
-optionally a set of **configuration variables**. You can then attach **actions** to your
-project.
-
-An **action** represents a specific endpoint of your api. It has a name, a method (http verb),
-an url, and optionally a body (in case of static body). You can also specify a set of **headers**.
-
-You can run an action with a set of **parameters** such body, path parameters, and query
-parameters.
-
-A **flow** represents an action or chained actions to run with predefined parameters.
-
-Finally, a **test suite** is a set of flows with expectations. You can run a test suite to
-check if your api is still working as expected.
-
-Some commands have an ui mode (history, project info). See the help for more information.
-
-## Features
-- [x] Create a new project
-- [x] Add an action to your project
-- [x] Run an action
-- [x] Extract data from your response using jsonpath (not fully implemented yet)
-- [x] Chain actions
-- [x] Test your action
 
 > [!WARNING]
 > Tested on MacOs only
 
+> [!INFO]
+> I am a newbie in Rust programming... If you take a look to the code be indulgent !
+
 ## Installation
+
 ### Build from source
 Install rust
 ```bash
@@ -70,67 +48,197 @@ for your platform (linux or darwin for the moment), and put in your path.
 
 ## Usage
 ```bash
-apikrab --help
+ak --help
 ```
 Works also for all subcommands, e.g.
 ```bash
-apikrab project --help
+ak project --help
 ```
 ![Help view](img/help.png "Help view")
 
+## Making simple API call
 
-## Create a new project
+Here some examples of how to make simple API calls:
+
+```bash
+ak run GET -u https://httpbin.org/anything
+ak run GET -u https://httpbin.org/anything -q name:Marco -q age:18
+ak run POST -u https://httpbin.org/anything -b name:Marco -b age:18
+ak run POST -u https://httpbin.org/anything -b name:Marco -b age:18 --form-data
+```
+
+### Don't repeat yourself
+
+The most annoying part for me is to rewrite / modify command line to test or adjust one API call.
+To tackle this problem, you can save your call with a mindful name and replay it later as it is or
+specifying new set of parameters.
+
+For example:
+
+```bash
+ak run GET -u https://httpbin.org/anything -q name:Marco -q age:18 --save anything-marco
+# then later
+ak run action anything-marco # this will replay the API call
+# or you can specify new set of parameters
+ak run action anything-marco -q name:Paolo -q age:54
+# you can add body and changing verb but will keep query parameters previously defined
+ak run action anything-marco -b name:Paolo -b age:54 -v POST
+```
+
+### Testing an API call with multiple parameters
+
+Sometimes, it can be useful to test an API with a set of query params or path params
+```bash
+ak run GET -u https://httpbin.org/anything -q 'name:Marco|Paolo' -q 'age:18|54'
+```
+It spawns the cartesian product of query params:
+```
+[00:00:00] 200 ✅  GET https://httpbin.org/anything?name=Marco&age=18
+[00:00:01] 200 ✅  GET https://httpbin.org/anything?age=54&name=Marco
+[00:00:00] 200 ✅  GET https://httpbin.org/anything?name=Paolo&age=18
+[00:00:00] 200 ✅  GET https://httpbin.org/anything?name=Paolo&age=54
+```
+### Extract interesting values
+
+You just made an API call. But you are especially interested in one key / subset of the payload.
+An option can help you extract the data you are interested in:
+
+```bash
+# run the same query as before but extracting only the data attribute of the payload
+ak run action anything-marco -b name:Paolo -b age:54 -v POST -e data
+```
+
+You can also save to the clipboard extracted data:
+```bash
+# run the same query as before but extracting only the data attribute of the payload
+ak run action anything-marco -b name:Paolo -b age:54 -v POST -e data --clipboard
+# below I hit Cmd + v after testing the command in my shell !
+{\"age\":\"54\",\"name\":\"Paolo\"}
+```
+
+### Use variables that can be reused between API calls
+
+You can assign variables to extracted data in order to be reused by next API calls
+
+```bash
+ak run action anything-marco -b name:Paolo -b age:54 -v POST -e data:BODY
+ak run action anything-marco -b {{BODY}}
+```
+
+### Chain API calls to make it a flow
+
+It can be useful to group successive API calls to make a unit of work, a flow that can be reused:
+
+```bash
+ak run action anything-marco -q 'name:Paolo;age:54' -c anything-marco -q 'name:Marco;age:18' --save anything-marco-paolo
+```
+
+> [!WARNING]
+> Chaining flows has saveral drawbacks for now:
+>   - you must specify the same parameters for all chained actions
+>   - you can only chain named actions
+
+### Add expectation to an API call
+
+You can test extracted values to be equal to what you expect
+
+```bash
+ ak r action anything-marco -e args.name:NAME -e args.age:AGE --expect NAME:Marco --expect AGE:18
+
+🐞 Analyzing results for anything-marco...
+   🦄 ??Checking... Tests passed ✅
+```
+
+Some expectations are predefined:
+- STATUS_CODE
+- JSON_INCLUDE
+  - ```bash
+    # means we want extract all json response and save it as DATA variable
+    ak run action get-todo -p id:1 -e '$:DATA' --expect 'DATA:JSON_INCLUDE({"id": 1})'
+    ```
+- JSON_EQ
+
+
+Gives the following output
+
+![tests results](img/tests.png "Test results")
+
+### Save your tested API calls to a TestSuite
+```bash
+ ak r action anything-marco -e args.name:NAME -e args.age:AGE --expect NAME:Marco --expect AGE:18 --save-to-ts httpbin-ts
+ ```
+
+ then run the  `httpbin-ts` test suite:
+
+```bash
+ ak r ts httpbin-ts
+
+ Running test suite httpbin-ts
+🐞 Analyzing results for anything-marco...
+   🦄 ??Checking... Tests passed ✅
+  [00:00:00] [████████████████████████████████████████] 1/1 DONE
+[00:00:00] 200 ✅  GET https://httpbin.org/anything?age=18&name=Marco
+🎉 All tests passed!
+ ```
+
+
+## Project Management
+
+You can group your API calls (or actions) into project instance. Project can hold configuration variables,
+and thus can be reused in API calls definition.
+
+### Create a new project
 
 specifying for example the test url for your project
 ```bash
-apikrab project new myproject --test-url https://jsonplaceholder.typicode.com
-
+ak project new myproject --url https://jsonplaceholder.typicode.com -c api_key:MY_API_KEY
 ```
 You can now add an action to your project
 
-## Add an action to your project
+### Add an action to your project
 
 You need to specify the name of your project, the name of your action,
 the http verb, and the sub-url
+
 ```bash
-apikrab project add-action myproject -n get-todo -v GET --url /todos/{id}
+ak project add-action myproject -n get-todo -v GET --url /todos/{id} -h 'x-api-key:{{api_key}}'
 ```
-Basic support for loading openapi spec file (v3 only) to populate your project
-and actions
+
+Basic support for loading **openapi spec file** (v3 only) to populate your project
+and actions or **postman** collections
 ```bash
 # if no servers are defined in your openapi spec, you can specify
 # one using --test-url or --prod-url
-apikrab project new myproject --from-openapi openapi.json
+ak project new myproject --from-openapi openapi.json
+ak project new myproject --from-postman postman_collection.json
 ```
 
-## Getting information about projects
+> [!WARNING]
+> This is an experimental feature and may fail...
 
 ### List all projects
 ```bash
-apikrab project list
+ak project list
 ```
 
 ### Get information about  your actions
 ```bash
-apikrab project info myproject
+ak project info myproject
 ```
 Or using the ui to see all projects at once
 ```bash
-apikrab project ui
+ak project ui
 ```
 ![Project view](img/project_view.png "Project view")
 
 
-## Run your action:
-- with path parameters, syntax is `-p name:value`
-- with query parameters, syntax is `-q name:value`
-- with body, syntax is `-b name:value` or `-b '{"name": "value"}'`
+### Run your action:
+Then, action can be ran as usual:
+
 ```bash
-apikrab run action get-todo -p id:1
+ak run action get-todo -p id:1
 ```
 ```
-Request took: 265.607263ms
-Status code: 200
 Received response:
 {
   "completed": false,
@@ -141,34 +249,7 @@ Received response:
 ...
 ```
 
-### Chain actions
-```
-# project as been created with configuration parameters CLIENT_ID and CLIENT_SECRET
-apikrab project add-action myproject -n authent\n
---static-body '{client_id:"{{CLIENT_ID}}", "client_secret": "{{CLIENT_SECRET}}", "grant-type": "client_credentials"}' \n
--u oauth/token --form
-
-apikrab project add-action myproject -n search_by_name\n
--u todos?name={name}
--h 'Authorization: Bearer {{ACCESS_TOKEN}}'
-
-apikrab run action authent -q '' -e access_token:ACCESS_TOKEN\n
---chain search_by_name -q 'name:Buy tomatoes' -e $ --save-as get-todo-by-name-flow
-
-apikrab run flow get-todo-by-name-flow
-```
-
-### Run action concurrently specifying several path params / query params:
-```bash
-apikrab run action get-todo -p id:1 -p id:2 -p id:3
-# or shortier
-apikrab run action get-todo -p 'id:1|2|3'
-# or with query params
-apikrab run action get-todo -p 'id:1|2|3' -q 'completed:true|false'
-# 🔥 launch the cartesian product of all params !
-```
-
-## Results handling
+### Examples
 Extract data from your response using jsonpath (not fully implemented yet)
 ```bash
 apikrab run action get-todo -p id:1 -e completed
@@ -191,54 +272,17 @@ You can use the grep option to filter out unwanted data
 apikrab run action get-todo -p id:1 -e $ --grep >> result.json
 ```
 
-## List all requests history
+## History
+
+### List all requests history
 ```bash
-apikrab history list
+ak history list
 ```
 or using the ui
 ```bash
-apikrab history ui
+ak history ui
 ```
 ![History view](img/history.png "History view")
-
-## Save your action as flow to avoid repeating yourself.
-
-This one is fairly simple.
-```bash
-apikrab run action get-todo -p id:1 -e completed:COMPLETED --save-flow get-todo
-```
-
-Then you just have to run
-```bash
-apikrab run flow get-todo
-```
-
-Flow are especially useful to test your api. You can add expectations to your flow.
-
-## Test your api
-
-```bash
-apikrab test-suite new mytest
-apikrab test-suite add-flow mytest -n get-todo --expect COMPLETED:false --expect STATUS_CODE:200
-
-apikrab run test-suite mytest
-```
-Some expectations are predefined:
-- STATUS_CODE
-- JSON_INCLUDE
-  - ```bash
-    # means we want extract all json response and save it as DATA variable
-    apikrab run action get-todo -p id:1 -e '$:DATA' --save-flow get-todo-2
-
-    # then we can use it in our test suite, expecting DATA to include {"id": 1}
-    apikrab test-suite add-flow mytest -n get-todo-2 --expect 'DATA:JSON_INCLUDE({"id": 1})'
-    ```
-- JSON_EQ
-
-
-Gives the following output
-
-![tests results](img/tests.png "Test results")
 
 
 ## Shell autocomplete
@@ -246,14 +290,14 @@ It is always more convenient to have autocomplete for your commands. Fortunately
 provides a way to generate a completion script for your shell.
 
 ```bash
-apikrab completion bash > /usr/local/etc/bash_completion.d/apikrab
+ak completion bash > /usr/local/etc/bash_completion.d/apikrab
 ```
 Clap also provides completion for zsh, fish, powershell, elvish.
 See the clap crate !
 
 
 > [!INFO]
-> For zsh, Generated script can autocomplete identifiers used for projects, actions, flows, and test suites.
+> For zsh, Generated script can autocomplete identifiers used for projects, actions, and test suites.
 
 
 ## Built with

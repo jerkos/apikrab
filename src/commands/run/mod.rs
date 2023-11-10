@@ -18,11 +18,22 @@ pub struct Run {
 
 #[derive(Subcommand)]
 pub enum RunCommands {
-    /// get
+    /// override verb to GET
     #[command(alias = "GET")]
     Get(Box<RunActionArgs>),
+    /// override verb to POST
+    #[command(alias = "POST")]
+    Post(Box<RunActionArgs>),
+    /// override verb to PUT
+    #[command(alias = "PUT")]
+    Put(Box<RunActionArgs>),
+    /// override verb to PUT
+    #[command(alias = "DELETE")]
+    Delete(Box<RunActionArgs>),
+
     /// Run an action
     Action(Box<RunActionArgs>),
     /// Run a saved test suite
+    #[command(alias = "ts")]
     TestSuite(test_suite::TestSuiteArgs),
 }

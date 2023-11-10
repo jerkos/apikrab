@@ -1,11 +1,29 @@
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use strum::{EnumString, Display};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use reqwest::multipart::{Form, Part};
 use reqwest::Method;
+
+
+#[derive(Debug, Clone, EnumString, Display)]
+pub enum Verb {
+    #[strum(serialize = "GET")]
+    GET,
+    #[strum(serialize = "POST")]
+    POST,
+    #[strum(serialize = "PUT")]
+    PUT,
+    #[strum(serialize = "DELETE")]
+    DELETE,
+    #[strum(serialize = "OPTIONS")]
+    OPTIONS,
+}
+
 
 #[derive(Debug, Clone)]
 pub struct FetchResult {
@@ -48,13 +66,12 @@ impl Api {
         body: (Option<Cow<'_, str>>, bool, bool),
     ) -> anyhow::Result<FetchResult> {
         // building request
-        let mut builder = match verb {
-            "POST" => self.client.post(url),
-            "PUT" => self.client.put(url),
-            "GET" => self.client.get(url),
-            "DELETE" => self.client.delete(url),
-            "OPTIONS" => self.client.request(Method::OPTIONS, url),
-            _ => panic!("Unsupported verb: {}", verb),
+        let mut builder = match Verb::from_str(verb)? {
+            Verb::POST => self.client.post(url),
+            Verb::PUT => self.client.put(url),
+            Verb::GET => self.client.get(url),
+            Verb::DELETE => self.client.delete(url),
+            Verb::OPTIONS => self.client.request(Method::OPTIONS, url),
         };
         // query params
         if let Some(qp) = query_params.as_ref() {

@@ -87,7 +87,7 @@ impl DomainAction {
             response: f.map(|r| r.response.clone()).ok(),
             status_code: f.map(|r| r.status).unwrap_or(0u16),
             duration: f.map(|r| r.duration.as_secs_f32()).unwrap_or(0f32),
-            timestamp: None,
+            created_at: None,
         })
         .await
     }
@@ -210,9 +210,12 @@ impl DomainAction {
                         )
                         .await;
                     // save history line, let it silent if it fails
-                    let _ = self
+                    if let Err(e) = self
                         .insert_history_line(computed_url, fetch_result.as_ref(), db)
-                        .await;
+                        .await
+                    {
+                        pb.println(format!("[ERROR] {}", e));
+                    }
 
                     let _ = self
                         .upsert_action(fetch_result.as_ref(), action_cloned, db)

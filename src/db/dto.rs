@@ -177,15 +177,15 @@ impl Context {
 
 #[derive(sqlx::FromRow, Debug)]
 pub struct History {
-    pub id: Option<i64>,
-    pub action_name: String,
-    pub url: String,
-    pub body: Option<String>,
-    pub headers: Option<String>,
-    pub response: Option<String>,
-    pub status_code: u16,
-    pub duration: f32,
-    pub timestamp: Option<chrono::NaiveDateTime>,
+    pub(crate) id: Option<i64>,
+    pub(crate) action_name: String,
+    pub(crate) url: String,
+    pub(crate) body: Option<String>,
+    pub(crate) headers: Option<String>,
+    pub(crate) response: Option<String>,
+    pub(crate) status_code: u16,
+    pub(crate) duration: f32,
+    pub(crate) created_at: Option<chrono::NaiveDateTime>,
 }
 
 impl Display for History {
@@ -193,7 +193,7 @@ impl Display for History {
         write!(
             f,
             "{} | {} | {} | {:?}",
-            self.timestamp
+            self.created_at
                 .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
                 .unwrap_or("None".to_string())
                 .cyan(),

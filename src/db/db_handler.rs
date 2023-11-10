@@ -38,8 +38,7 @@ CREATE TABLE history (
     response TEXT,
     status_code INTEGER NOT NULL,
     duration REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(action_name) REFERENCES actions(name)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE test_suite (
@@ -76,12 +75,6 @@ pub struct DBHandler {
 }
 
 impl DBHandler {
-    /*
-    pub fn new() -> Self {
-        Self { conn: None }
-    }
-    */
-
     fn get_conn(&self) -> &SqlitePool {
         self.conn
             .as_ref()
@@ -258,7 +251,7 @@ impl DBHandler {
         let r = sqlx::query(
             r#"
             INSERT INTO history (id, action_name, url, body, headers, response, status_code, duration)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
             "#,
         )
         .bind(history.id)
@@ -283,7 +276,7 @@ impl DBHandler {
                 r#"
             SELECT *
             FROM history
-            ORDER BY timestamp DESC
+            ORDER BY created_at DESC
             limit {};
             "#,
                 _limit

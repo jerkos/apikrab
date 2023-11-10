@@ -10,7 +10,7 @@ const SINGLE_INTERPOL_END: char = '}';
 const MULTI_INTERPOL_START: &str = "{{";
 const MULTI_INTERPOL_END: &str = "}}";
 
-pub const SEP: &str = ",,";
+pub const SEP: &str = ";";
 
 #[derive(Debug, Clone, Copy)]
 pub enum Interpol {
@@ -112,7 +112,7 @@ where
     serde_json::from_str(conf)
         .map_err(|e| anyhow::anyhow!(e))
         .unwrap_or_else(|_| {
-            conf.split(",,")
+            conf.split(SEP)
                 .map(|s| {
                     let mut split = s.split(':');
                     (
