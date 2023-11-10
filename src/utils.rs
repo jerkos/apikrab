@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_conf_as_opt_with_grouping() {
-        let conf = "a:1|2|3,b:4|5|6";
+        let conf = "a:1|2|3;b:4|5|6";
         let parsed = _parse_multiple_conf_as_opt_with_grouping(conf.into());
         assert_eq!(parsed.get("a").unwrap(), &vec!["1", "2", "3"]);
         assert_eq!(parsed.get("b").unwrap(), &vec!["4", "5", "6"]);
