@@ -64,8 +64,11 @@ lazy_static! {
     };
 }
 
-
-async fn run_wrapper(run_action_args: &mut Box<RunActionArgs>, v: Option<Verb>, db_handler: &DBHandler) {
+async fn run_wrapper(
+    run_action_args: &mut Box<RunActionArgs>,
+    v: Option<Verb>,
+    db_handler: &DBHandler,
+) {
     let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
     run_action_args.verb = v.map(|v| v.to_string());
     let _ = run_action_args

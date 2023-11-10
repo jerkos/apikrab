@@ -1,14 +1,13 @@
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use strum::{EnumString, Display};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
+use strum::{Display, EnumString};
 
 use reqwest::multipart::{Form, Part};
 use reqwest::Method;
-
 
 #[derive(Debug, Clone, EnumString, Display)]
 pub enum Verb {
@@ -23,7 +22,6 @@ pub enum Verb {
     #[strum(serialize = "OPTIONS")]
     OPTIONS,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct FetchResult {
