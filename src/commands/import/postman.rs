@@ -1,12 +1,13 @@
-use crate::commands::import::openapi::Import;
+use crate::commands::run::action::RunActionArgs;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::{Action, Project};
 use async_recursion::async_recursion;
 use async_trait::async_trait;
 use indicatif::{MultiProgress, ProgressBar};
-use postman_collection::v2_1_0;
+use postman_collection::v2_1_0::{self, Url};
 use postman_collection::v2_1_0::{HeaderUnion, Items, RequestUnion};
-use std::collections::HashMap;
+
+use super::import::Import;
 
 fn replace_postman_path(path: &str) -> &str {
     if let Some(stripped) = path.strip_prefix(':') {
@@ -21,69 +22,62 @@ pub struct PostmanImporter<'a> {
 }
 
 impl<'a> PostmanImporter<'a> {
-    pub fn items_to_action(item: &Items, current_name: &str, project_name: &str) -> Option<Action> {
-        item.request.as_ref()?;
+    pub fn get_url(url: &Url) -> Option<String> {
+        let r = match url {
+            v2_1_0::Url::String(s) => s.clone(),
+            v2_1_0::Url::UrlClass(u_cls) => u_cls
+                .path
+                .as_ref()
+                .map(|p| match p {
+                    v2_1_0::UrlPath::String(s) => s
+                        .split('/')
+                        .map(|s| replace_postman_path(s).to_string())
+                        .collect::<Vec<String>>(),
+                    v2_1_0::UrlPath::UnionArray(p_cls) => p_cls
+                        .iter()
+                        .map(|p| match p {
+                            v2_1_0::PathElement::String(s) => replace_postman_path(s).to_string(),
+                            v2_1_0::PathElement::PathClass(uv_cls) => {
+                                uv_cls.value.as_ref().unwrap_or(&"".to_string()).to_string()
+                            }
+                        })
+                        .collect(),
+                })
+                .map(|v| v.join("/"))
+                .unwrap_or("".to_string()),
+        };
+        Some(r)
+    }
 
-        match &item.request.as_ref().unwrap() {
-            RequestUnion::RequestClass(r_cls) => Some(Action {
-                name: item
-                    .id
-                    .as_ref()
-                    .map(String::from)
-                    .unwrap_or(current_name.to_string()),
-                url: r_cls
-                    .url
-                    .as_ref()
-                    .map(|url| match url {
-                        v2_1_0::Url::String(s) => s.clone(),
-                        v2_1_0::Url::UrlClass(u_cls) => u_cls
-                            .path
-                            .as_ref()
-                            .map(|p| match p {
-                                v2_1_0::UrlPath::String(s) => s
-                                    .split('/')
-                                    .map(|s| replace_postman_path(s).to_string())
-                                    .collect::<Vec<String>>(),
-                                v2_1_0::UrlPath::UnionArray(p_cls) => p_cls
-                                    .iter()
-                                    .map(|p| match p {
-                                        v2_1_0::PathElement::String(s) => {
-                                            replace_postman_path(s).to_string()
-                                        }
-                                        v2_1_0::PathElement::PathClass(uv_cls) => uv_cls
-                                            .value
-                                            .as_ref()
-                                            .unwrap_or(&"".to_string())
-                                            .to_string(),
-                                    })
-                                    .collect(),
-                            })
-                            .map(|v| v.join("/"))
-                            .unwrap_or("".to_string()),
-                    })
-                    .unwrap_or("".to_string()),
-                verb: r_cls
-                    .method
-                    .as_ref()
-                    .map(String::from)
-                    .unwrap_or("".to_string()),
-                headers: r_cls
-                    .header
-                    .as_ref()
-                    .map(|header| match header {
-                        HeaderUnion::HeaderArray(h_cls) => {
-                            let r = h_cls
-                                .iter()
-                                .map(|h| (h.key.clone(), h.value.clone()))
-                                .collect::<HashMap<String, String>>();
-                            serde_json::to_string(&r).unwrap_or("{}".to_string())
-                        }
-                        HeaderUnion::String(s) => s.clone(),
-                    })
-                    .unwrap_or("{}".to_string()),
-                project_name: project_name.to_string(),
-                ..Default::default()
-            }),
+    pub fn get_headers(header: &HeaderUnion) -> Option<Vec<String>> {
+        let r = match header {
+            HeaderUnion::HeaderArray(h_cls) => h_cls
+                .iter()
+                .map(|h| vec![h.key.clone(), h.value.clone()].join(":"))
+                .collect(),
+            HeaderUnion::String(s) => vec![s.clone()],
+        };
+        Some(r)
+    }
+
+    pub fn items_to_action(item: &Items, current_name: &str, project_name: &str) -> Option<Action> {
+        match item.request.as_ref()? {
+            RequestUnion::RequestClass(r_cls) => {
+                let run_action_args = RunActionArgs {
+                    url: r_cls.url.as_ref().and_then(Self::get_url),
+                    verb: r_cls.method.clone(),
+                    header: r_cls.header.as_ref().and_then(Self::get_headers),
+                    ..Default::default()
+                };
+                Some(Action {
+                    name: Some(current_name.to_string()),
+                    run_action_args: Some(
+                        serde_json::to_string(&run_action_args).unwrap_or("{}".to_string()),
+                    ),
+                    project_name: Some(project_name.to_string()),
+                    ..Default::default()
+                })
+            }
             RequestUnion::String(_) => None,
         }
     }
@@ -111,7 +105,7 @@ impl<'a> PostmanImporter<'a> {
                 .as_ref()
                 .map(|n| n.to_ascii_lowercase().replace(' ', "-"))
                 .unwrap_or(format!("{}-{}", name, i));
-            let name = item.id.as_ref().unwrap_or(fallback);
+            let name: &String = item.id.as_ref().unwrap_or(fallback);
             if item.item.is_some() {
                 let sub_p = m.as_ref().unwrap().add(indicatif::ProgressBar::new(
                     item.item.as_ref().unwrap().len() as u64,
@@ -119,7 +113,7 @@ impl<'a> PostmanImporter<'a> {
                 self.insert_actions(item.item.as_ref().unwrap(), name, project_name, Some(sub_p))
                     .await;
             } else if let Some(action) = Self::items_to_action(item, name, project_name) {
-                let r = self.db_handler.upsert_action(&action, true).await;
+                let r = self.db_handler.upsert_action(&action).await;
                 if r.is_err() {
                     println!("error upserting action: {}", r.err().unwrap());
                 }
@@ -140,13 +134,6 @@ impl<'a> Import for PostmanImporter<'a> {
             ));
         }
         let collection = spec.unwrap();
-
-        // small check that we have a server url
-        if project.test_url.is_none() && project.prod_url.is_none() {
-            return Err(anyhow::anyhow!(
-                "No test_url, prod_url or servers found in postman collection file"
-            ));
-        }
 
         // upsert project first
         self.db_handler.upsert_project(project).await?;

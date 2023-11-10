@@ -1,6 +1,8 @@
+use crate::commands::run::action::RunActionArgs;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::Action;
 use clap::Args;
+use crossterm::style::Stylize;
 
 #[derive(Args)]
 pub struct AddActionArgs {
@@ -21,7 +23,7 @@ pub struct AddActionArgs {
 
     /// maybe a static body
     #[arg(short, long)]
-    pub static_body: Option<String>,
+    pub static_body: Option<Vec<String>>,
 
     /// adding header separated by a :
     #[arg(short = 'H', long)]
@@ -31,15 +33,32 @@ pub struct AddActionArgs {
     #[arg(long)]
     pub form_data: bool,
 
+    /// url encoded body
     #[arg(long)]
     pub url_encoded: bool,
 }
 
 impl AddActionArgs {
     pub async fn add_action(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
-        let action: Action = self.into();
+        let mut action: Action = self.into();
+        action.project_name = Some(self.project_name.clone());
 
-        db_handler.upsert_action(&action, false).await?;
+        let mut r = RunActionArgs::default();
+        r.name = Some(self.name.clone());
+        r.url = Some(self.url.clone());
+        r.verb = Some(self.verb.clone());
+        r.header = self.header.clone();
+        r.body = self.static_body.clone();
+        r.form_data = self.form_data;
+        r.url_encoded = self.url_encoded;
+
+        action.run_action_args = Some(serde_json::to_string(&r)?);
+
+        let r = db_handler.upsert_action(&action).await;
+        match r {
+            Ok(_) => println!("Action {} saved", self.name.clone().green()),
+            Err(e) => println!("Error saving flow {}", e),
+        }
         Ok(())
     }
 }

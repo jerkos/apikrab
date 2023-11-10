@@ -1,11 +1,29 @@
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use strum::{EnumString, Display};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use reqwest::multipart::{Form, Part};
 use reqwest::Method;
+
+
+#[derive(Debug, Clone, EnumString, Display)]
+pub enum Verb {
+    #[strum(serialize = "GET")]
+    GET,
+    #[strum(serialize = "POST")]
+    POST,
+    #[strum(serialize = "PUT")]
+    PUT,
+    #[strum(serialize = "DELETE")]
+    DELETE,
+    #[strum(serialize = "OPTIONS")]
+    OPTIONS,
+}
+
 
 #[derive(Debug, Clone)]
 pub struct FetchResult {
@@ -20,18 +38,22 @@ impl FetchResult {
     }
 }
 
-static URL_ENCODED: &str = "application/x-www-form-urlencoded";
-static FORM_DATA: &str = "multipart/form-data";
-static APPLICATION_JSON: &str = "application/json";
-
 pub struct Api {
     pub(crate) client: reqwest::Client,
 }
 
 impl Api {
-    pub fn new() -> Self {
+    pub fn new(timeout: Option<u64>, disable_cert_validation: bool) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::ClientBuilder::new()
+                .danger_accept_invalid_certs(disable_cert_validation)
+                .timeout(
+                    timeout
+                        .map(Duration::from_secs)
+                        .unwrap_or(Duration::from_secs(10)),
+                )
+                .build()
+                .expect("Error building reqwest client"),
         }
     }
 
@@ -41,21 +63,19 @@ impl Api {
         verb: &str,
         headers: &HashMap<String, String>,
         query_params: Option<&HashMap<String, String>>,
-        body: Option<&Cow<'_, str>>,
+        body: (Option<Cow<'_, str>>, bool, bool),
     ) -> anyhow::Result<FetchResult> {
         // building request
-        let mut builder = match verb {
-            "POST" => self.client.post(url),
-            "PUT" => self.client.put(url),
-            "GET" => self.client.get(url),
-            "DELETE" => self.client.delete(url),
-            "OPTIONS" => self.client.request(Method::OPTIONS, url),
-            _ => panic!("Unsupported verb: {}", verb),
+        let mut builder = match Verb::from_str(verb)? {
+            Verb::POST => self.client.post(url),
+            Verb::PUT => self.client.put(url),
+            Verb::GET => self.client.get(url),
+            Verb::DELETE => self.client.delete(url),
+            Verb::OPTIONS => self.client.request(Method::OPTIONS, url),
         };
-
         // query params
-        if query_params.is_some() {
-            builder = builder.query(query_params.as_ref().unwrap());
+        if let Some(qp) = query_params.as_ref() {
+            builder = builder.query(qp);
         }
 
         // Add custom headers
@@ -69,27 +89,23 @@ impl Api {
         builder = builder.headers(header_map);
 
         // body
-        let content_type = headers
-            .get::<str>(reqwest::header::CONTENT_TYPE.as_ref())
-            .cloned()
-            .unwrap_or(APPLICATION_JSON.to_string());
-        let is_url_encoded = content_type == URL_ENCODED;
-        let is_form_data = content_type == FORM_DATA;
-
+        let is_url_encoded = body.1;
+        let is_form_data = body.2;
+        let b = body.0;
         builder = match (is_url_encoded, is_form_data) {
             (true, true) => panic!("Cannot have both url encoded and form data"),
             (false, false) => {
-                if body.is_some() {
-                    builder = builder.body(body.as_ref().unwrap().to_string());
+                if b.is_some() {
+                    builder = builder.body(b.as_ref().unwrap().to_string());
                 }
                 builder
             }
             (true, false) => builder.form(&serde_json::from_str::<HashMap<String, String>>(
-                body.as_ref().unwrap(),
+                b.as_ref().unwrap(),
             )?),
             (false, true) => {
                 let mut form = Form::new();
-                let body = body.as_ref().unwrap();
+                let body = b.as_ref().unwrap();
                 for (part_name, v) in serde_json::from_str::<HashMap<String, String>>(body)? {
                     // handle file upload
                     if v.starts_with('@') {
@@ -105,7 +121,6 @@ impl Api {
                 builder.multipart(form)
             }
         };
-
         // launching request
         let start = Instant::now();
         let response = builder.send().await?;
@@ -114,7 +129,6 @@ impl Api {
         // getting status and response
         let status = response.status();
         let text: String = response.text().await?;
-
         let fetch_result = FetchResult {
             response: text,
             status: status.as_u16(),

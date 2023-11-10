@@ -8,18 +8,11 @@ use std::collections::HashMap;
 
 /// Print response and extracted values
 pub struct HttpResult<'a> {
-    pub(crate) fetch_result: &'a anyhow::Result<FetchResult>,
+    pub(crate) fetch_result: anyhow::Result<&'a FetchResult, &'a anyhow::Error>,
     pub(crate) printer: &'a mut Printer,
 }
 
 impl<'a> HttpResult<'a> {
-    pub fn new(fetch_result: &'a anyhow::Result<FetchResult>, printer: &'a mut Printer) -> Self {
-        Self {
-            fetch_result,
-            printer,
-        }
-    }
-
     fn extract_pattern(
         &mut self,
         (pattern_to_extract, value_name): (&str, Option<&str>),
@@ -45,7 +38,7 @@ impl<'a> HttpResult<'a> {
         if extracted_as_string.is_empty() {
             pb.suspend(|| {
                 println!(
-                    " ⚠️No value extracted for pattern {}",
+                    " ⚠️  No value extracted for pattern {}",
                     pattern_to_extract.bright_green()
                 )
             });
@@ -98,7 +91,7 @@ impl<'a> HttpResult<'a> {
 
     pub fn handle_result(
         &mut self,
-        extract_pattern: Option<&HashMap<&str, Option<&str>>>,
+        extract_pattern: Option<&HashMap<String, Option<String>>>,
         ctx: &mut HashMap<String, String>,
         pb: &ProgressBar,
     ) -> anyhow::Result<()> {

@@ -1,9 +1,9 @@
-mod _http_result;
+pub(crate) mod _http_result;
 pub(crate) mod _printer;
-mod _run_helper;
-mod _test_checker;
+pub(crate) mod _progress_bar;
+pub(crate) mod _run_helper;
+pub(crate) mod _test_checker;
 pub(crate) mod action;
-mod flow;
 mod test_suite;
 
 use clap::{Args, Subcommand};
@@ -18,10 +18,22 @@ pub struct Run {
 
 #[derive(Subcommand)]
 pub enum RunCommands {
+    /// override verb to GET
+    #[command(alias = "GET")]
+    Get(Box<RunActionArgs>),
+    /// override verb to POST
+    #[command(alias = "POST")]
+    Post(Box<RunActionArgs>),
+    /// override verb to PUT
+    #[command(alias = "PUT")]
+    Put(Box<RunActionArgs>),
+    /// override verb to PUT
+    #[command(alias = "DELETE")]
+    Delete(Box<RunActionArgs>),
+
     /// Run an action
-    Action(RunActionArgs),
-    /// Run a saved flow
-    Flow(flow::RunFlowArgs),
+    Action(Box<RunActionArgs>),
     /// Run a saved test suite
+    #[command(alias = "ts")]
     TestSuite(test_suite::TestSuiteArgs),
 }

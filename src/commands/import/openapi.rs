@@ -1,59 +1,31 @@
+use crate::commands::run::action::RunActionArgs;
 use crate::db::db_handler::DBHandler;
 use crate::db::dto::{Action, Project};
 use async_trait::async_trait;
 use openapiv3::{OpenAPI, Operation};
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 
-#[async_trait]
-pub trait Import {
-    /// load a file or url
-    async fn load(&self, file_or_url: &str) -> anyhow::Result<String> {
-        let mut r = File::open(file_or_url).await;
-
-        match r {
-            Ok(ref mut file) => {
-                let mut contents = String::new();
-                if (file.read_to_string(&mut contents).await).is_ok() {
-                    Ok(contents)
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Error loading file or url: {}",
-                        file_or_url
-                    ))
-                }
-            }
-            Err(_) => {
-                if let Ok(text) = reqwest::get(file_or_url).await?.text().await {
-                    Ok(text)
-                } else {
-                    Err(anyhow::anyhow!(
-                        "Error loading file or url: {}",
-                        file_or_url
-                    ))
-                }
-            }
-        }
-    }
-
-    /// import main function
-    async fn import(&self, input: &str, project: &mut Project) -> anyhow::Result<()>;
-}
+use super::import::Import;
 
 pub struct OpenapiV3Importer<'a> {
     pub db_handler: &'a DBHandler,
 }
 
 impl<'a> OpenapiV3Importer<'a> {
-    pub fn get_action(op: &Operation, path: &str, verb: &str) -> Action {
+    pub fn get_action(op: &Operation, path: &str, verb: &str, project_name: &str) -> Action {
+        let run_action_args = RunActionArgs {
+            url: Some(path[1..].to_string()),
+            verb: Some(verb.to_string()),
+            ..Default::default()
+        };
+
         Action {
-            url: path[1..].to_string(),
-            headers: "{}".to_string(),
-            verb: verb.to_string(),
+            id: None,
             name: op
                 .operation_id
                 .clone()
-                .unwrap_or(format!("{}-{}", verb, path)),
+                .and_then(|_| Some(format!("{}-{}", verb, path))),
+            run_action_args: serde_json::to_string(&run_action_args).ok(),
+            project_name: Some(project_name.to_string()),
             ..Default::default()
         }
     }
@@ -63,13 +35,6 @@ impl<'a> OpenapiV3Importer<'a> {
 impl<'a> Import for OpenapiV3Importer<'a> {
     async fn import(&self, input: &str, project: &mut Project) -> anyhow::Result<()> {
         let openapi: OpenAPI = serde_json::from_str(input)?;
-
-        // small check that we have a server url
-        if project.test_url.is_none() && project.prod_url.is_none() && openapi.servers.is_empty() {
-            return Err(anyhow::anyhow!(
-                "No test_url, prod_url or servers found in openapi file"
-            ));
-        }
 
         // upsert project first
         self.db_handler.upsert_project(project).await?;
@@ -89,8 +54,8 @@ impl<'a> Import for OpenapiV3Importer<'a> {
 
                 for (verb, op) in verbs.iter().zip(operations.iter()) {
                     if let Some(op) = op {
-                        let action = Self::get_action(op, &path, verb);
-                        self.db_handler.upsert_action(&action, false).await?;
+                        let action = Self::get_action(op, &path, verb, &project.name);
+                        self.db_handler.upsert_action(&action).await?;
                     }
                 }
             }

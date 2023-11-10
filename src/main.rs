@@ -1,26 +1,28 @@
 mod commands;
 mod db;
+pub mod domain;
 mod http;
 mod json_path;
 mod ui;
 mod utils;
-
 use std::io;
 use std::path::PathBuf;
 
 use crate::commands::history::{History, HistoryCommands};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+use commands::run::action::RunActionArgs;
 use futures::StreamExt;
+use http::Verb;
 use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
 use sqlx::{Column, Executor, Row};
 
-use crate::commands::flow::{Flow, FlowCommands};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
 use crate::db::db_handler::DBHandler;
+use crate::db::dto::Project as DtoProject;
 use crate::ui::run_ui::UIRunner;
 
 #[derive(Parser)]
@@ -36,31 +38,46 @@ enum Commands {
     /// Create or update a new project with specified parameters
     Project(Project),
     /// Run a project action, flow or test suite
+    #[command(alias = "r")]
     Run(Run),
-    /// Get information about existing flows
-    Flow(Flow),
     /// Test suite information
+    #[command(alias = "ts")]
     TestSuite(TestSuite),
     /// List all history call
+    #[command(alias = "h")]
     History(History),
     /// Print the completion script in stdout
     PrintCompleteScript { shell: Shell },
-    /// Exec sql command
+    /// Exec sql command (for debug purpose)
     Sql { q: String },
 }
 
 lazy_static! {
     pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
+    pub static ref DEFAULT_PROJECT: DtoProject = DtoProject {
+        id: None,
+        name: "DEFAULT".to_string(),
+        main_url: "".to_string(),
+        conf: None,
+        created_at: None,
+        updated_at: None
+    };
+}
+
+
+async fn run_wrapper(run_action_args: &mut Box<RunActionArgs>, v: Option<Verb>, db_handler: &DBHandler) {
+    let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
+    run_action_args.verb = v.map(|v| v.to_string());
+    let _ = run_action_args
+        .run_action(&requester, &db_handler, None, None)
+        .await;
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // init database if needed
-    let mut db_handler = DBHandler::new();
+    let mut db_handler = DBHandler::default();
     db_handler.init_db().await?;
-
-    // init http requester
-    let requester = http::Api::new();
 
     // parse cli args
     let mut cli: Cli = Cli::parse();
@@ -83,27 +100,34 @@ async fn main() -> anyhow::Result<()> {
                 project_info_args.show_info(&db_handler).await?;
             }
             ProjectCommands::Ui => {
-                let projects = db_handler.get_projects().await?;
+                let mut projects = db_handler.get_projects().await?;
+                projects.push(DEFAULT_PROJECT.clone());
                 let mut ui = commands::project::project_ui::ProjectUI::new(projects, db_handler);
                 ui.run_ui()?;
             }
         },
         Commands::Run(run) => match &mut run.run_commands {
+            // init http requester
             RunCommands::Action(run_action_args) => {
-                run_action_args.run_action(&requester, &db_handler).await?;
-            }
-            RunCommands::Flow(run_flow_args) => {
-                run_flow_args.run_flow(&db_handler, &requester).await?;
+                run_wrapper(run_action_args, None, &db_handler).await;
             }
             RunCommands::TestSuite(test_suite_args) => {
+                let requester = http::Api::new(Some(10), true);
                 test_suite_args
                     .run_test_suite(&requester, &db_handler)
                     .await?;
             }
-        },
-        Commands::Flow(flow) => match &mut flow.flow_commands {
-            FlowCommands::List(flow_list_args) => {
-                flow_list_args.list_flows(&db_handler).await?;
+            RunCommands::Get(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::GET), &db_handler).await;
+            }
+            RunCommands::Post(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::POST), &db_handler).await;
+            }
+            RunCommands::Put(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::PUT), &db_handler).await;
+            }
+            RunCommands::Delete(run_action_args) => {
+                run_wrapper(run_action_args, Some(Verb::DELETE), &db_handler).await;
             }
         },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {
@@ -111,9 +135,6 @@ async fn main() -> anyhow::Result<()> {
                 create_test_suite_args
                     .upsert_test_suite(&db_handler)
                     .await?;
-            }
-            TestSuiteCommands::AddTestSuite(add_test_suite_args) => {
-                add_test_suite_args.add_test_suite(&db_handler).await?;
             }
         },
         Commands::History(history) => match &mut history.history_commands {
@@ -130,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
             generate(
                 shell,
                 &mut Cli::command(),
-                "apicrab".to_string(),
+                "apikrab".to_string(),
                 &mut io::stdout(),
             );
         }
@@ -157,7 +178,12 @@ async fn main() -> anyhow::Result<()> {
                                             "{}{}: {}, ",
                                             acc,
                                             col.name(),
-                                            sqlite_row.try_get::<String, _>(col.name()).unwrap()
+                                            sqlite_row
+                                                .try_get::<String, _>(col.name())
+                                                .unwrap_or_else(|_| sqlite_row
+                                                    .try_get::<i32, _>(col.name())
+                                                    .map(|i| i.to_string())
+                                                    .unwrap())
                                         )
                                     })
                             );
