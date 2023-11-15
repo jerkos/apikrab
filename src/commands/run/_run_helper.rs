@@ -85,11 +85,23 @@ pub fn get_body<'a>(body: &'a str, ctx: &HashMap<String, String>) -> Option<Cow<
 }
 
 /// complete an url with http if not present
+/// if requested url starts with http or https, do nothing
+/// if requested url starts with :, add http://localhost
+/// otherwise add https://
+/// ```rust
+/// assert_eq!(complete_url("http://localhost:8080"), "http://localhost:8080");
+/// assert_eq!(complete_url(":8080"), "https://localhost:8080");
+/// ```
 fn complete_url(url: &str) -> Cow<str> {
+    // if url starts with http, do nothing
     if url.starts_with("http") {
         return Cow::Borrowed(url);
     }
-    Cow::Owned(format!("http://localhost{}", url))
+    if url.starts_with(':') {
+        Cow::Owned(format!("http://localhost{}", url))
+    } else {
+        Cow::Owned(format!("https://{}", url))
+    }
 }
 
 fn get_full_url<'a>(project_url: Option<&'a str>, action_url: &'a str) -> Cow<'a, str> {
@@ -214,4 +226,24 @@ pub fn merge_with(run_actions_args: &RunActionArgs, o: &RunActionArgs) -> RunAct
         clone.url_encoded = o.url_encoded;
     }
     clone
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_complete_url() {
+        assert_eq!(complete_url("http://localhost:8080"), "http://localhost:8080");
+        assert_eq!(complete_url(":8080"), "http://localhost:8080");
+        assert_eq!(complete_url("google.com"), "https://google.com");
+
+    }
+
+    #[test]
+    fn test_get_full_url() {
+        assert_eq!(get_full_url(Some("http://localhost:8080"), "test"), "http://localhost:8080/test");
+        assert_eq!(get_full_url(None, ":8080"), "http://localhost:8080");
+    }
 }

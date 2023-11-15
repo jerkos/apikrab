@@ -139,6 +139,7 @@ dependencies = [
  "postman_collection",
  "rand",
  "ratatui",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

@@ -43,14 +43,16 @@ impl AddActionArgs {
         let mut action: Action = self.into();
         action.project_name = Some(self.project_name.clone());
 
-        let mut r = RunActionArgs::default();
-        r.name = Some(self.name.clone());
-        r.url = Some(self.url.clone());
-        r.verb = Some(self.verb.clone());
-        r.header = self.header.clone();
-        r.body = self.static_body.clone();
-        r.form_data = self.form_data;
-        r.url_encoded = self.url_encoded;
+        let r = RunActionArgs {
+            name: Some(self.name.clone()),
+            url: Some(self.url.clone()),
+            verb: Some(self.verb.clone()),
+            header: self.header.clone(),
+            body: self.static_body.clone(),
+            form_data: self.form_data,
+            url_encoded: self.url_encoded,
+            ..Default::default()
+        };
 
         action.run_action_args = Some(serde_json::to_string(&r)?);
 

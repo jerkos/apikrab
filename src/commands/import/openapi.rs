@@ -23,7 +23,7 @@ impl<'a> OpenapiV3Importer<'a> {
             name: op
                 .operation_id
                 .clone()
-                .and_then(|_| Some(format!("{}-{}", verb, path))),
+                .map(|_| format!("{}-{}", verb, path)),
             run_action_args: serde_json::to_string(&run_action_args).ok(),
             project_name: Some(project_name.to_string()),
             ..Default::default()

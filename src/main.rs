@@ -72,7 +72,7 @@ async fn run_wrapper(
     let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
     run_action_args.verb = v.map(|v| v.to_string());
     let _ = run_action_args
-        .run_action(&requester, &db_handler, None, None)
+        .run_action(&requester, db_handler, None, None)
         .await;
 }
 
@@ -121,16 +121,16 @@ async fn main() -> anyhow::Result<()> {
                     .await?;
             }
             RunCommands::Get(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::GET), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Get), &db_handler).await;
             }
             RunCommands::Post(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::POST), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Post), &db_handler).await;
             }
             RunCommands::Put(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::PUT), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Put), &db_handler).await;
             }
             RunCommands::Delete(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::DELETE), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Delete), &db_handler).await;
             }
         },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {

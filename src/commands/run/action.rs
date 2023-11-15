@@ -170,7 +170,7 @@ impl RunActionArgs {
         if let Some(lr) = last_results {
             let expected = parse_cli_conf_to_map(self.expect.as_ref());
             if let Some(ex) = &expected {
-                tests_is_success = TestChecker::new(lr, ctx, ex)
+                tests_is_success = TestChecker {fetch_results: lr, ctx, expected: ex}
                     .check(self.name.as_deref().unwrap_or("flow"), main_pb);
             }
         }
@@ -187,6 +187,7 @@ impl RunActionArgs {
             if let Some(current_action_name) = &self.name {
                 let action = db.get_action(current_action_name).await?;
                 let run_action_args_from_db = action.get_run_action_args()?;
+                // merge with current run action args
                 merged = merge_with(&run_action_args_from_db, run_action_args);
             }
             let r = db

@@ -16,7 +16,7 @@ where
     let to_be_replaced = format!("{}(", fn_name);
     fn_with_args
         .replace(&to_be_replaced, "")
-        .replace(")", "")
+        .replace(')', "")
         .parse::<T>()
 }
 
@@ -25,6 +25,8 @@ const JSON_INCLUDE: &str = "JSON_INCLUDE";
 const JSON_EQ: &str = "JSON_EQ";
 const INT: &str = "INT";
 const FLOAT: &str = "FLOAT";
+const REGEX: &str = "REGEX";
+const EMAIL: &str = "EMAIL";
 
 #[derive(Debug)]
 pub enum TestFn {
@@ -34,6 +36,8 @@ pub enum TestFn {
     Int(i64),
     Float(f64),
     NoMatch,
+    Regex(regex::Regex),
+    Email(regex::Regex),
 }
 
 impl FromStr for TestFn {
@@ -50,6 +54,10 @@ impl FromStr for TestFn {
             TestFn::Int(get_args::<i64>(s, INT)?)
         } else if s.starts_with(FLOAT) {
             TestFn::Float(get_args::<f64>(s, INT)?)
+        } else if s.starts_with(REGEX) {
+            TestFn::Regex(regex::Regex::new(s)?)
+        } else if s.starts_with(EMAIL) {
+            TestFn::Email(regex::Regex::new("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$")?)
         } else {
             TestFn::NoMatch
         })
@@ -63,25 +71,17 @@ pub struct TestChecker<'a> {
 }
 
 impl<'a> TestChecker<'a> {
-    pub fn new(
-        fetch_results: &'a Vec<R>,
-        ctx: &'a HashMap<String, String>,
-        expected: &'a HashMap<String, String>,
-    ) -> Self {
-        Self {
-            fetch_results,
-            ctx,
-            expected,
-        }
-    }
-
+    /// tests are ran after finishing all the requests
+    /// So no need to pass the progress bar here to avoid stdout
+    /// conflicts
     pub fn print_err(&self, key: &str, got: &str, expected: &str) {
-        let gott = if got.is_empty() { "EMPTY STR" } else { got };
+        let gott = if got.is_empty() { "<empty str>" } else { got };
         let r = format!("   Expected '{}' to be `{}` got `{}`", key, expected, gott).red();
         println!("{}", r);
     }
 
-    pub fn raw_check<T>(&self, key: &str, expected: T, ctx: &HashMap<String, String>) -> bool
+    /// default check for int, float and strings
+    fn default_check<T>(&self, key: &str, expected: T, ctx: &HashMap<String, String>) -> bool
     where
         T: FromStr + Display + PartialEq,
         <T as FromStr>::Err: std::fmt::Debug,
@@ -92,6 +92,23 @@ impl<'a> TestChecker<'a> {
             return false;
         }
         true
+    }
+
+    /// Special check for regex
+    fn regex_based_check(&self, key: &str, regex: &regex::Regex, ctx: &HashMap<String, String>) -> bool {
+        match ctx.get(key) {
+            Some(ctx_value) => {
+                let is_err = !regex.is_match(ctx_value);
+                if is_err {
+                    self.print_err(key, ctx_value, regex.as_str());
+                }
+                is_err
+            }
+            None => {
+                self.print_err(key, "<empty str>", regex.as_str());
+                false
+            }
+        }
     }
 
     pub fn _check(&self, result: &FetchResult, ctx: &HashMap<String, String>) -> bool {
@@ -122,8 +139,10 @@ impl<'a> TestChecker<'a> {
                         );
                     })
                     .is_ok(),
-                    Ok(TestFn::Int(expected)) => self.raw_check(key, expected, ctx),
-                    Ok(TestFn::Float(expected)) => self.raw_check(key, expected, ctx),
+                    Ok(TestFn::Int(expected)) => self.default_check(key, expected, ctx),
+                    Ok(TestFn::Float(expected)) => self.default_check(key, expected, ctx),
+                    Ok(TestFn::Regex(regex)) => self.regex_based_check(key, &regex, ctx),
+                    Ok(TestFn::Email(regex)) => self.regex_based_check(key, &regex, ctx),
                     Ok(TestFn::NoMatch) => match ctx.get(key) {
                         Some(ctx_value) => {
                             let is_err = ctx_value != value;

@@ -1,7 +1,10 @@
 use arboard::Clipboard;
+use colored::Colorize;
 
+
+/// Handle printing configuration and clipboard option
 pub struct Printer {
-    pub no_print: bool,
+    pub quiet: bool,
     pub clipboard: bool,
     pub clipboard_instance: Option<Clipboard>,
 
@@ -11,12 +14,12 @@ pub struct Printer {
 }
 
 impl Printer {
-    pub fn new(no_print: bool, clipboard: bool, grepped: bool) -> Self {
+    pub fn new(quiet: bool, clipboard: bool, grepped: bool) -> Self {
         Self {
-            no_print,
+            quiet,
             clipboard,
             clipboard_instance: if clipboard {
-                Some(Clipboard::new().expect("Error initializing clipboard"))
+                Clipboard::new().ok()
             } else {
                 None
             },
@@ -24,9 +27,9 @@ impl Printer {
         }
     }
 
-    pub fn p_response(&self, print_fn: impl FnOnce()) {
+    pub fn p_response(&self, response: &str, pb: &indicatif::ProgressBar) {
         if self.grepped {
-            print_fn();
+            pb.suspend(|| println!("{}", response));
         }
     }
 
@@ -34,23 +37,29 @@ impl Printer {
         if self.grepped {
             return;
         }
-        if !self.no_print {
+        if !self.quiet {
             print_fn();
         }
     }
 
+    /// Print error in red given a progress bar
+    pub fn p_error(&self, printed_str: &str, pb: &indicatif::ProgressBar) {
+        if self.grepped {
+            return;
+        }
+        if !self.quiet {
+            let f = format!("Error: {}", printed_str).red();
+            pb.suspend(|| println!("{}", f));
+        }
+    }
+
     pub fn maybe_to_clip(&mut self, value: &str) {
-        if self.clipboard {
-            let r = self
-                .clipboard_instance
-                .as_mut()
-                .unwrap()
-                .set_text(value.to_owned());
-            if r.is_err() {
-                println!("Error setting clipboard: {}", r.err().unwrap());
-            } else {
-                println!("Copied to clipboard !");
-            }
+        match self
+            .clipboard_instance
+            .as_mut()
+            .and_then(|c| c.set_text(value.to_owned()).ok()) {
+                Some(_) => println!("Copied to clipboard !"),
+                None => println!("Error setting clipboard"),
         }
     }
 }

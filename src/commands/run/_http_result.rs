@@ -2,7 +2,6 @@ use crate::commands::run::_printer::Printer;
 use crate::http::FetchResult;
 use crate::json_path;
 use colored::Colorize;
-use crossterm::style::Stylize;
 use indicatif::ProgressBar;
 use std::collections::HashMap;
 
@@ -62,9 +61,8 @@ impl<'a> HttpResult<'a> {
     }
 
     fn print_response(&mut self, response: &str, pb: &ProgressBar) -> anyhow::Result<()> {
-        // grep is superior to no_print option
-        self.printer
-            .p_response(|| pb.suspend(|| println!("{}", response)));
+        // grep is superior to quiet option
+        self.printer.p_response(response, pb);
         // print response as info if needed
         self.printer.p_info(|| {
             pb.suspend(|| println!("Received response: "));
@@ -118,13 +116,12 @@ impl<'a> HttpResult<'a> {
 
                         // to clip if necessary and print response if grepped
                         self.printer.maybe_to_clip(&concat_pattern);
-                        self.printer
-                            .p_response(|| pb.suspend(|| println!("{}", concat_pattern)));
+                        self.printer.p_response(&concat_pattern, pb);
                     }
                     None => self.print_response(response, pb)?,
                 }
             }
-            Err(e) => println!("Error: {}", e),
+            Err(e) => self.printer.p_error(&format!("{}", e), pb)
         };
 
         Ok(())

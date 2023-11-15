@@ -12,15 +12,15 @@ use reqwest::Method;
 #[derive(Debug, Clone, EnumString, Display)]
 pub enum Verb {
     #[strum(serialize = "GET")]
-    GET,
+    Get,
     #[strum(serialize = "POST")]
-    POST,
+    Post,
     #[strum(serialize = "PUT")]
-    PUT,
+    Put,
     #[strum(serialize = "DELETE")]
-    DELETE,
+    Delete,
     #[strum(serialize = "OPTIONS")]
-    OPTIONS,
+    Options,
 }
 
 #[derive(Debug, Clone)]
@@ -65,11 +65,11 @@ impl Api {
     ) -> anyhow::Result<FetchResult> {
         // building request
         let mut builder = match Verb::from_str(verb)? {
-            Verb::POST => self.client.post(url),
-            Verb::PUT => self.client.put(url),
-            Verb::GET => self.client.get(url),
-            Verb::DELETE => self.client.delete(url),
-            Verb::OPTIONS => self.client.request(Method::OPTIONS, url),
+            Verb::Post => self.client.post(url),
+            Verb::Put => self.client.put(url),
+            Verb::Get => self.client.get(url),
+            Verb::Delete => self.client.delete(url),
+            Verb::Options => self.client.request(Method::OPTIONS, url),
         };
         // query params
         if let Some(qp) = query_params.as_ref() {
