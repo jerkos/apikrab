@@ -170,8 +170,12 @@ impl RunActionArgs {
         if let Some(lr) = last_results {
             let expected = parse_cli_conf_to_map(self.expect.as_ref());
             if let Some(ex) = &expected {
-                tests_is_success = TestChecker {fetch_results: lr, ctx, expected: ex}
-                    .check(self.name.as_deref().unwrap_or("flow"), main_pb);
+                tests_is_success = TestChecker {
+                    fetch_results: lr,
+                    ctx,
+                    expected: ex,
+                }
+                .check(self.name.as_deref().unwrap_or("flow"), main_pb);
             }
         }
         tests_is_success

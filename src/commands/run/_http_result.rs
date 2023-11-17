@@ -121,7 +121,7 @@ impl<'a> HttpResult<'a> {
                     None => self.print_response(response, pb)?,
                 }
             }
-            Err(e) => self.printer.p_error(&format!("{}", e), pb)
+            Err(e) => self.printer.p_error(&format!("{}", e), pb),
         };
 
         Ok(())

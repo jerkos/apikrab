@@ -95,7 +95,12 @@ impl<'a> TestChecker<'a> {
     }
 
     /// Special check for regex
-    fn regex_based_check(&self, key: &str, regex: &regex::Regex, ctx: &HashMap<String, String>) -> bool {
+    fn regex_based_check(
+        &self,
+        key: &str,
+        regex: &regex::Regex,
+        ctx: &HashMap<String, String>,
+    ) -> bool {
         match ctx.get(key) {
             Some(ctx_value) => {
                 let is_err = !regex.is_match(ctx_value);

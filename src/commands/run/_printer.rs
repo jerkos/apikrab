@@ -1,7 +1,6 @@
 use arboard::Clipboard;
 use colored::Colorize;
 
-
 /// Handle printing configuration and clipboard option
 pub struct Printer {
     pub quiet: bool,
@@ -57,9 +56,10 @@ impl Printer {
         match self
             .clipboard_instance
             .as_mut()
-            .and_then(|c| c.set_text(value.to_owned()).ok()) {
-                Some(_) => println!("Copied to clipboard !"),
-                None => println!("Error setting clipboard"),
+            .and_then(|c| c.set_text(value.to_owned()).ok())
+        {
+            Some(_) => println!("Copied to clipboard !"),
+            None => println!("Error setting clipboard"),
         }
     }
 }

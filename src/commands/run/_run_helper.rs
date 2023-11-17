@@ -228,22 +228,26 @@ pub fn merge_with(run_actions_args: &RunActionArgs, o: &RunActionArgs) -> RunAct
     clone
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_complete_url() {
-        assert_eq!(complete_url("http://localhost:8080"), "http://localhost:8080");
+        assert_eq!(
+            complete_url("http://localhost:8080"),
+            "http://localhost:8080"
+        );
         assert_eq!(complete_url(":8080"), "http://localhost:8080");
         assert_eq!(complete_url("google.com"), "https://google.com");
-
     }
 
     #[test]
     fn test_get_full_url() {
-        assert_eq!(get_full_url(Some("http://localhost:8080"), "test"), "http://localhost:8080/test");
+        assert_eq!(
+            get_full_url(Some("http://localhost:8080"), "test"),
+            "http://localhost:8080/test"
+        );
         assert_eq!(get_full_url(None, ":8080"), "http://localhost:8080");
     }
 }
