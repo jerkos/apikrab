@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use apikrab::json_path::{json_path, parse_input_js_path, CmpToken, JspExp, JspToken};
 use itertools::Itertools;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[test]
 fn test_from_str() {
@@ -108,4 +108,80 @@ fn test_jme_path_bis() {
         "#;
     let result = json_path(json, "$.a.b.c[0].d");
     assert_eq!(result, Some(Value::String("e".to_string())));
+}
+
+#[test]
+fn test_machines() {
+    let json = r#"
+    {
+        "machines": [
+            {"name": "a", "state": "running"},
+            {"name": "b", "state": "stopped"},
+            {"name": "c", "state": "running"}
+        ]
+    }"#;
+    let result = json_path(json, "$.machines[?(@.state == 'running')].name");
+    println!("{:?}", result);
+    assert_eq!(
+        result,
+        Some(Value::Array(vec![
+            Value::String("a".to_string()),
+            Value::String("c".to_string())
+        ]))
+    );
+}
+
+#[test]
+fn test_machines_multiselect() {
+    let json = r#"
+    {
+        "machines": [
+            {"name": "a", "state": "running"},
+            {"name": "b", "state": "stopped"},
+            {"name": "c", "state": "running"}
+        ]
+    }"#;
+    let result = json_path(json, "$.machines[?(@.state == 'running')].[name, state]");
+    println!("{:?}", result);
+    assert_eq!(
+        result,
+        Some(Value::Array(vec![
+            Value::Array(vec![
+                Value::String("a".to_string()),
+                Value::String("running".to_string())
+            ]),
+            Value::Array(vec![
+                Value::String("c".to_string()),
+                Value::String("running".to_string())
+            ]),
+        ]))
+    );
+}
+
+#[test]
+fn test_machines_multiselect_object() {
+    let json = r#"{"name": "a", "state": "running"}"#;
+    let result = json_path(json, "$.[name, state]");
+    println!("{:?}", result);
+    assert_eq!(
+        result,
+        Some(Value::Array(vec![
+            Value::String("a".to_string()),
+            Value::String("running".to_string())
+        ]),)
+    );
+}
+
+#[test]
+fn test_machines_multiselect_hash() {
+    let json = r#"{"name": "a", "state": "running"}"#;
+    let result = json_path(json, "$.{Name:name, Value:state}");
+    println!("{:?}", result);
+    assert_eq!(
+        result,
+        Some(Value::Object(Map::from_iter(vec![
+            ("Name".to_string(), Value::String("a".to_string())),
+            ("Value".to_string(), Value::String("running".to_string()))
+        ]))),
+    );
 }
