@@ -83,7 +83,7 @@ impl<'a> HttpResult<'a> {
         });
 
         // save response to clipboard if necessary
-        self.printer.maybe_to_clip(response);
+        self.printer.maybe_to_clip(response, pb);
         Ok(())
     }
 
@@ -115,7 +115,7 @@ impl<'a> HttpResult<'a> {
                             .join("\n");
 
                         // to clip if necessary and print response if grepped
-                        self.printer.maybe_to_clip(&concat_pattern);
+                        self.printer.maybe_to_clip(&concat_pattern, pb);
                         self.printer.p_response(&concat_pattern, pb);
                     }
                     None => self.print_response(response, pb)?,

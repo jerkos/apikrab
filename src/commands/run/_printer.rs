@@ -52,14 +52,18 @@ impl Printer {
         }
     }
 
-    pub fn maybe_to_clip(&mut self, value: &str) {
-        match self
-            .clipboard_instance
-            .as_mut()
-            .and_then(|c| c.set_text(value.to_owned()).ok())
-        {
-            Some(_) => println!("Copied to clipboard !"),
-            None => println!("Error setting clipboard"),
+    pub fn maybe_to_clip(&mut self, value: &str, pb: &indicatif::ProgressBar) {
+        if self.clipboard {
+            let r = self
+                .clipboard_instance
+                .as_mut()
+                .and_then(|c| c.set_text(value.to_owned()).ok());
+            if !self.quiet {
+                match r {
+                    Some(_) => pb.println("👍 Copied to clipboard !"),
+                    None => pb.println("Error setting clipboard"),
+                }
+            }
         }
     }
 }

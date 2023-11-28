@@ -188,9 +188,7 @@ impl FromStr for JspExp {
                     let mut split = s.trim().split(COLON);
                     (
                         split.next().expect("expecting key").trim().to_owned(),
-                        JspExp::Attribute(
-                            split.next().expect("expecting value").trim().to_owned(),
-                        ),
+                        JspExp::Attribute(split.next().expect("expecting value").trim().to_owned()),
                     )
                 })
                 .collect();
@@ -277,9 +275,9 @@ fn evaluate<'a>(
             // if current value is an object, returning the attribute
             let mut target_value = current_value;
             for attribute in attributes.split(DOT) {
-                 if let Value::Object(map) = &target_value {
-                     target_value = map.get(attribute)?;
-                 }
+                if let Value::Object(map) = &target_value {
+                    target_value = map.get(attribute)?;
+                }
             }
             Some(Cow::Borrowed(target_value))
         }
@@ -383,7 +381,8 @@ fn evaluate<'a>(
                                 },
                                 _ => false,
                             }
-                        }).cloned()
+                        })
+                        .cloned()
                         .collect_vec();
                 Some(Cow::Owned(Value::Array(filtered)))
             }
@@ -481,7 +480,6 @@ pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
     // tokenize search
     let tokenized = parse_input_js_path(search);
 
-    println!("tokenized: {:?}", tokenized);
     // iterate over tokenization
     for (name, jsexp) in &tokenized {
         // retrieving the current json value
@@ -514,7 +512,6 @@ pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
             Some(result_mut)
         };
 
-        println!("current_value: {:?}, jsexp {:?}", current_value, jsexp);
         // if current value is none, returning early
         // else evaluating the jsexp which returns a cow json value
         result = match current_value {
