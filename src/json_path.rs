@@ -248,19 +248,6 @@ impl FromStr for JspExp {
                     .map(|s| s.parse::<JspExp>())
                     .collect::<Result<Vec<JspExp>, _>>()?,
             ))
-            /*
-            if content.starts_with('\'') {
-                return Ok(JspExp::Fn(
-                    func.clone(),
-                    vec![JspExp::Value(JspToken::Empty, vec![content.to_string()])],
-                ));
-            }
-            let values = content
-                .split(COMMA)
-                .map(|s| s.trim().parse::<JspExp>())
-                .collect::<Result<Vec<JspExp>, _>>()?;
-            Ok(JspExp::Fn(func.clone(), values))
-            */
         } else {
             Ok(JspExp::Value(JspToken::Empty, vec![s.to_string()]))
         }
@@ -586,7 +573,7 @@ pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
     let search = search.strip_prefix(&dollar_plus_dot);
 
     if search.is_none() {
-        println!("Invalid search: {}", search.unwrap());
+        eprintln!("Invalid search: {}", search.unwrap());
         return None;
     }
 
@@ -600,7 +587,6 @@ pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
 
     // tokenize search
     let tokenized = parse_input_js_path(search);
-    println!("tokenized: {:?}", tokenized);
 
     // iterate over tokenization
     for (name, jsexp) in &tokenized {
