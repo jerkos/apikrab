@@ -185,3 +185,69 @@ fn test_machines_multiselect_hash() {
         ]))),
     );
 }
+
+#[test]
+fn test_machines_sort() {
+    let json = r#"
+    {
+        "machines": [
+            {"name": "b", "state": "stopped"},
+            {"name": "c", "state": "running"},
+            {"name": "a", "state": "running"}
+        ]
+    }"#;
+    let result3 = json_path(json, "$.machines[?(@.state == 'running')].name.sort(@)");
+    println!(" Result: {:?}", result3);
+    assert_eq!(
+        result3,
+        Some(Value::Array(vec![
+            Value::String("a".to_string()),
+            Value::String("c".to_string()),
+        ]))
+    );
+}
+
+#[test]
+fn test_machines_len() {
+    let json = r#"
+    {
+        "machines": [
+            {"name": "b", "state": "stopped"},
+            {"name": "c", "state": "running"},
+            {"name": "a", "state": "running"}
+        ]
+    }"#;
+    let result3 = json_path(json, "$.machines[?(@.state == 'running')].length()");
+    println!(" Result: {:?}", result3);
+    assert_eq!(
+        result3,
+        Some(Value::Number(serde_json::Number::from_f64(2.0f64).unwrap()))
+    );
+}
+
+#[test]
+fn test_machines_join() {
+    let json = r#"
+    {
+        "machines": [
+            {"name": "b", "state": "stopped"},
+            {"name": "c", "state": "running"},
+            {"name": "a", "state": "running"}
+        ]
+    }"#;
+    let result3 = json_path(json, "$.machines[?(@.state == 'running')].name.join(', ')");
+    println!(" Result: {:?}", result3);
+    assert_eq!(result3, Some(Value::String("c, a".to_string())));
+
+    let v: Vec<&str> = "', '"
+        .split_terminator("',")
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            if v.trim().ends_with("'") {
+                return ", ";
+            }
+            v.trim().trim_start_matches("'")
+        })
+        .collect();
+    assert_eq!(v, [", "]);
+}

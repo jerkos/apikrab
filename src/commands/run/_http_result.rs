@@ -2,6 +2,7 @@ use crate::commands::run::_printer::Printer;
 use crate::http::FetchResult;
 use crate::json_path;
 use colored::Colorize;
+use colored_json::ToColoredJson;
 use indicatif::ProgressBar;
 use std::collections::HashMap;
 
@@ -49,7 +50,10 @@ impl<'a> HttpResult<'a> {
                 println!(
                     "Extraction of {}: {} {}",
                     pattern_to_extract.bright_green(),
-                    extracted_as_string.bright_magenta(),
+                    extracted_as_string
+                        .to_colored_json_auto()
+                        .ok()
+                        .unwrap_or_else(|| extracted_as_string.clone()),
                     value_name
                         .map(|v| format!("saved as {}", v.bright_yellow()))
                         .unwrap_or("".to_string())

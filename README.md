@@ -313,6 +313,7 @@ See the clap crate !
 
 ## Ideas
 - [ ] Share your project with others
+- [ ] implements yaml/json collection instead of sqlite (human readable)
 - [ ] Extend expectation mechanisms (regex, jsonpath, include, ...)
 - [ ] Improve the ui
 

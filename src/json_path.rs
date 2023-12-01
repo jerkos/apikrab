@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, ops::Deref, rc::Rc, str::FromStr};
+use std::{borrow::Cow, cmp::Ordering, collections::HashMap, ops::Deref, rc::Rc, str::FromStr};
 
 use itertools::Itertools;
 use serde_json::{Map, Value};
@@ -49,6 +49,17 @@ pub enum CmpToken {
     Lte,
     #[strum(serialize = "<")]
     Lt,
+}
+
+// Enum of all implemented jmespath functions
+#[derive(EnumString, EnumIter, Display, Debug, Clone, AsRefStr, PartialEq)]
+pub enum Fn {
+    #[strum(serialize = "sort")]
+    Sort,
+    #[strum(serialize = "join")]
+    Join,
+    #[strum(serialize = "length")]
+    Length,
 }
 
 fn content_between<'a>(json_str: &'a str, start_char: &'a str, end_char: &'a str) -> &'a str {
@@ -136,6 +147,9 @@ pub enum JspExp {
         Box<crate::json_path::JspExp>,
     ),
 
+    // sort(@.price)
+    Fn(Fn, Vec<crate::json_path::JspExp>),
+
     // present in multiselect for example
     Attribute(String), // will be next Vec<Box<crate::json_path::JspExp>>),
 
@@ -212,6 +226,41 @@ impl FromStr for JspExp {
                 None => Ok(JspExp::Value(JspToken::Empty, attributes)),
                 _ => Err(anyhow::anyhow!("Invalid value, expecting @ or $")),
             }
+        // parsing function
+        } else if let Some(func) = Fn::iter()
+            .filter(|fn_name| s.starts_with(fn_name.as_ref()))
+            .collect::<Vec<_>>()
+            .first()
+        {
+            let start = func.as_ref().to_owned() + OPAREN;
+            let content = content_between(s, &start, CPAREN);
+            Ok(JspExp::Fn(
+                func.clone(),
+                content
+                    .split_terminator("',")
+                    .filter(|v| !v.is_empty())
+                    .map(|v| {
+                        if v.trim().ends_with('\'') {
+                            return ", ";
+                        }
+                        v.trim().trim_start_matches('\'')
+                    })
+                    .map(|s| s.parse::<JspExp>())
+                    .collect::<Result<Vec<JspExp>, _>>()?,
+            ))
+            /*
+            if content.starts_with('\'') {
+                return Ok(JspExp::Fn(
+                    func.clone(),
+                    vec![JspExp::Value(JspToken::Empty, vec![content.to_string()])],
+                ));
+            }
+            let values = content
+                .split(COMMA)
+                .map(|s| s.trim().parse::<JspExp>())
+                .collect::<Result<Vec<JspExp>, _>>()?;
+            Ok(JspExp::Fn(func.clone(), values))
+            */
         } else {
             Ok(JspExp::Value(JspToken::Empty, vec![s.to_string()]))
         }
@@ -388,12 +437,83 @@ fn evaluate<'a>(
             }
             _ => None,
         },
+        // handle function
+        JspExp::Fn(fn_name, values) => match fn_name {
+            Fn::Join => match current_value {
+                // join values of the array
+                Value::Array(array) => {
+                    println!("values: {:?}", values[0]);
+                    match &values[0] {
+                        JspExp::Value(_, v) => Some(Cow::Owned(Value::String(
+                            array
+                                .iter()
+                                .map(|v| match v {
+                                    Value::String(s) => s.clone(),
+                                    Value::Number(n) => n.to_string(),
+                                    _ => "".to_owned(),
+                                })
+                                .collect_vec()
+                                .join(v[0].trim_end_matches('\'').trim_start_matches('\'')),
+                        ))),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
+            Fn::Length => match current_value {
+                Value::Array(array) => Some(Cow::Owned(Value::Number(
+                    serde_json::Number::from_f64(array.len() as f64).unwrap(),
+                ))),
+                _ => None,
+            },
+            Fn::Sort => {
+                match &values[0] {
+                    JspExp::Value(_, _) => {}
+                    _ => return None,
+                };
+                match current_value {
+                    Value::Array(array) => {
+                        let mut cloned = array.clone();
+                        cloned.sort_by(|a, b| {
+                            let left_opt = evaluate(root, a, &values[0]);
+                            let right_opt = evaluate(root, b, &values[0]);
+                            match (left_opt.as_ref(), right_opt.as_ref()) {
+                                (None, None) => Ordering::Equal,
+                                (Some(_), None) => Ordering::Greater,
+                                (None, Some(_)) => Ordering::Less,
+                                (
+                                    Some(Cow::Borrowed(Value::Number(left))),
+                                    Some(Cow::Borrowed(Value::Number(right))),
+                                ) => {
+                                    let left = left.as_f64().expect("failed to parse f64");
+                                    let right = right.as_f64().expect("failed to parse f64");
+                                    left.partial_cmp(&right).unwrap()
+                                }
+                                (
+                                    Some(Cow::Borrowed(Value::String(left))),
+                                    Some(Cow::Borrowed(Value::String(right))),
+                                ) => left.as_str().partial_cmp(right.as_str()).unwrap(),
+                                // do not know how to compare ?
+                                _ => std::cmp::Ordering::Equal,
+                            }
+                        });
+                        Some(Cow::Owned(Value::Array(cloned)))
+                    }
+                    _ => None,
+                }
+            }
+        },
     }
 }
 
 fn get_name_and_jsexp(value: &str, ending_str: Option<&str>) -> (String, Option<JspExp>) {
     match ending_str {
-        None => (value.to_string(), None),
+        None => {
+            if Fn::iter().any(|fn_name| value.starts_with(fn_name.as_ref())) {
+                return ("".to_string(), Some(value.parse::<JspExp>().ok().unwrap()));
+            }
+            (value.to_string(), None)
+        }
         Some(brace_or_bracket) => {
             let mut split = value.split(brace_or_bracket);
             let name = split.next().expect("name expected or empty string");
@@ -426,8 +546,8 @@ pub fn parse_input_js_path(json_path: &str) -> Vec<(String, Option<JspExp>)> {
             prev_value = current_value.to_string();
             continue;
         }
-
-        if !prev_value.is_empty() && !(bracket_finished || brace_finished) {
+        // if prev value is not empty and bracket or brace is not finished
+        if !(prev_value.is_empty() || bracket_finished || brace_finished) {
             prev_value = format!("{}.{}", prev_value, current_value);
             continue;
         }
@@ -437,6 +557,7 @@ pub fn parse_input_js_path(json_path: &str) -> Vec<(String, Option<JspExp>)> {
         } else {
             format!("{}.{}", prev_value, current_value)
         };
+
         results.push(get_name_and_jsexp(
             &value,
             if brace_finished {
@@ -465,7 +586,7 @@ pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
     let search = search.strip_prefix(&dollar_plus_dot);
 
     if search.is_none() {
-        eprint!("Invalid search: {}", search.unwrap());
+        println!("Invalid search: {}", search.unwrap());
         return None;
     }
 
@@ -479,6 +600,7 @@ pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
 
     // tokenize search
     let tokenized = parse_input_js_path(search);
+    println!("tokenized: {:?}", tokenized);
 
     // iterate over tokenization
     for (name, jsexp) in &tokenized {

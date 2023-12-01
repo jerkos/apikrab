@@ -37,3 +37,4 @@ home = "0.5.5"
 tui-textarea = {version = "0.2.4", features=["ratatui-crossterm"], default-features = false}
 strum = { version = "0.25", features = ["derive"] }
 regex = "1.10.2"
+colored_json = "4.1.0"
