@@ -3,15 +3,21 @@ mod db;
 pub mod domain;
 mod http;
 mod json_path;
+pub mod python;
 mod ui;
 mod utils;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
-use crate::commands::history::{History, HistoryCommands};
+use crate::commands::history::History;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+use commands::history::HistoryCommands;
 use commands::run::action::RunActionArgs;
+use db::db_json::JsonHandler;
+use db::db_sqlite::SqliteDb;
+use db::db_trait::Db;
 use futures::StreamExt;
 use http::Verb;
 use lazy_static::lazy_static;
@@ -21,9 +27,52 @@ use sqlx::{Column, Executor, Row};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
-use crate::db::db_handler::DBHandler;
 use crate::db::dto::Project as DtoProject;
 use crate::ui::run_ui::UIRunner;
+
+#[derive(Debug, Clone, Default)]
+pub enum DBEngine {
+    Sqlite,
+    #[default]
+    Fs,
+}
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub(crate) db_engine: DBEngine,
+    pub(crate) db_path: Option<String>,
+}
+
+lazy_static! {
+    pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
+    pub static ref DEFAULT_PROJECT: DtoProject = DtoProject {
+        id: None,
+        name: "DEFAULT".to_string(),
+        main_url: "".to_string(),
+        conf: None,
+        created_at: None,
+        updated_at: None
+    };
+    pub static ref DEFAULT_DB_PATH: String = format!("{}/.config/qapi", HOME_DIR.to_str().unwrap());
+    pub static ref CONFIG: Mutex<Config> = Mutex::new(Config {
+        db_engine: DBEngine::Fs,
+        db_path: Some(DEFAULT_DB_PATH.clone())
+    });
+}
+
+async fn get_db() -> Box<dyn Db + 'static> {
+    let config = CONFIG.lock().unwrap();
+    match &config.db_engine {
+        DBEngine::Fs => Box::new(JsonHandler {
+            root: config.db_path.clone(),
+        }),
+        DBEngine::Sqlite => {
+            let mut sqlite = SqliteDb { conn: None };
+            sqlite.init_db().await.unwrap();
+            Box::new(sqlite)
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -52,22 +101,10 @@ enum Commands {
     Sql { q: String },
 }
 
-lazy_static! {
-    pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
-    pub static ref DEFAULT_PROJECT: DtoProject = DtoProject {
-        id: None,
-        name: "DEFAULT".to_string(),
-        main_url: "".to_string(),
-        conf: None,
-        created_at: None,
-        updated_at: None
-    };
-}
-
 async fn run_wrapper(
     run_action_args: &mut Box<RunActionArgs>,
     v: Option<Verb>,
-    db_handler: &DBHandler,
+    db_handler: &Box<dyn Db>,
 ) {
     let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
     run_action_args.verb = v.map(|v| v.to_string());
@@ -79,28 +116,28 @@ async fn run_wrapper(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // init database if needed
-    let mut db_handler = DBHandler::default();
-    db_handler.init_db().await?;
+    let db_handler = get_db().await;
 
+    println!("there");
     // parse cli args
     let mut cli: Cli = Cli::parse();
 
     match &mut cli.commands {
         Commands::Project(project) => match &mut project.project_commands {
             ProjectCommands::New(create_project_args) => {
-                create_project_args.create(&db_handler).await?;
+                create_project_args.create(db_handler).await?;
             }
             ProjectCommands::RmAction(rm_action_args) => {
-                rm_action_args.rm_action(&db_handler).await?;
+                rm_action_args.rm_action(db_handler).await?;
             }
             ProjectCommands::AddAction(add_action_args) => {
-                add_action_args.add_action(&db_handler).await?;
+                add_action_args.add_action(db_handler).await?;
             }
             ProjectCommands::List(list_projects) => {
-                list_projects.list_projects(&db_handler).await?;
+                list_projects.list_projects(db_handler).await?;
             }
             ProjectCommands::Info(project_info_args) => {
-                project_info_args.show_info(&db_handler).await?;
+                project_info_args.show_info(db_handler).await?;
             }
             ProjectCommands::Ui => {
                 let mut projects = db_handler.get_projects().await?;
@@ -135,9 +172,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {
             TestSuiteCommands::New(create_test_suite_args) => {
-                create_test_suite_args
-                    .upsert_test_suite(&db_handler)
-                    .await?;
+                create_test_suite_args.upsert_test_suite(db_handler).await?;
             }
         },
         Commands::History(history) => match &mut history.history_commands {
@@ -147,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
                 ui.run_ui()?;
             }
             HistoryCommands::List(list_args) => {
-                list_args.list_history(&db_handler).await?;
+                list_args.list_history(db_handler).await?;
             }
         },
         &mut Commands::PrintCompleteScript { shell } => {
@@ -159,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
             );
         }
         Commands::Sql { q } => {
-            let r = db_handler.conn.unwrap().fetch_many(q.as_str());
+            let r = db_handler.get_connection().unwrap().fetch_many(q.as_str());
             r.for_each(|row| async {
                 if let Ok(r) = row {
                     match r {

@@ -1,16 +1,16 @@
 use crate::commands::run::action::RunActionArgs;
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
 use async_trait::async_trait;
 use openapiv3::{OpenAPI, Operation};
 
 use super::import::Import;
 
-pub struct OpenapiV3Importer<'a> {
-    pub db_handler: &'a DBHandler,
+pub struct OpenapiV3Importer<'a, T: Db> {
+    pub db_handler: &'a T,
 }
 
-impl<'a> OpenapiV3Importer<'a> {
+impl<'a, T: Db> OpenapiV3Importer<'a, T> {
     pub fn get_action(op: &Operation, path: &str, verb: &str, project_name: &str) -> Action {
         let run_action_args = RunActionArgs {
             url: Some(path[1..].to_string()),
@@ -24,7 +24,7 @@ impl<'a> OpenapiV3Importer<'a> {
                 .operation_id
                 .clone()
                 .map(|_| format!("{}-{}", verb, path)),
-            run_action_args: serde_json::to_string(&run_action_args).ok(),
+            run_action_args: Some(run_action_args),
             project_name: Some(project_name.to_string()),
             ..Default::default()
         }
@@ -32,7 +32,7 @@ impl<'a> OpenapiV3Importer<'a> {
 }
 
 #[async_trait]
-impl<'a> Import for OpenapiV3Importer<'a> {
+impl<'a, T: Db + Send + Sync> Import for OpenapiV3Importer<'a, T> {
     async fn import(&self, input: &str, project: &mut Project) -> anyhow::Result<()> {
         let openapi: OpenAPI = serde_json::from_str(input)?;
 

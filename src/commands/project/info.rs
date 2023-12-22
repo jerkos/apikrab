@@ -1,4 +1,4 @@
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use clap::Args;
 use colored::Colorize;
 
@@ -9,7 +9,7 @@ pub struct ProjectInfoArgs {
 }
 
 impl ProjectInfoArgs {
-    pub async fn show_info(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
+    pub async fn show_info(&self, db_handler: Box<dyn Db>) -> anyhow::Result<()> {
         let project = db_handler.get_project(&self.name).await?;
         println!("{}\n", project);
 

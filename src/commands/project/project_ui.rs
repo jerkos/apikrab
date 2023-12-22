@@ -1,4 +1,4 @@
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
@@ -8,6 +8,7 @@ use crossterm::event::{self};
 use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::{io, thread};
 use tokio::runtime::Handle;
@@ -22,12 +23,9 @@ enum ActiveArea {
     ResponseExample,
 }
 
-const NO_JSON_VALUE: &str = "\"NO_JSON_VALUE\"";
-const NO_JSON_VALUE_UNESCAPED: &str = "NO_JSON_VALUE";
-
 #[derive(Clone)]
 pub(crate) struct ProjectUI<'a> {
-    db: DBHandler,
+    db: Box<dyn Db>,
     active_area: ActiveArea,
     projects: StatefulList<Project>,
     actions: StatefulList<Action>,
@@ -37,7 +35,7 @@ pub(crate) struct ProjectUI<'a> {
 }
 
 impl<'a> ProjectUI<'a> {
-    pub fn new(projects: Vec<Project>, db_handler: DBHandler) -> Self {
+    pub fn new(projects: Vec<Project>, db_handler: Box<dyn Db>) -> Self {
         Self {
             db: db_handler,
             active_area: ActiveArea::ProjectPane,
@@ -70,11 +68,11 @@ impl<'a> ProjectUI<'a> {
         text_area.move_cursor(tui_textarea::CursorMove::Top)
     }
 
-    fn payload_as_str_pretty(payload: Option<&str>) -> anyhow::Result<String> {
+    fn payload_as_str_pretty(payload: Option<&Value>) -> anyhow::Result<String> {
         let r = serde_json::to_string_pretty(
-            &serde_json::from_str::<serde_json::Value>(payload.unwrap_or(NO_JSON_VALUE)).unwrap_or(
-                serde_json::Value::String(NO_JSON_VALUE_UNESCAPED.to_string()),
-            ),
+            &payload
+                .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null),
         )?;
         Ok(r)
     }
@@ -289,10 +287,10 @@ impl<'a> ProjectUI<'a> {
 
         // getting action body and response example
         let current_action = &self.actions.items[selected_action_index.unwrap()];
-        let body_example = Self::payload_as_str_pretty(current_action.body_example.as_deref())
+        let body_example = Self::payload_as_str_pretty(current_action.body_example.as_ref())
             .unwrap_or("FAILED TO PARSE BODY EXAMPLE".to_string());
         let response_example =
-            Self::payload_as_str_pretty(current_action.response_example.as_deref())
+            Self::payload_as_str_pretty(current_action.response_example.as_ref())
                 .unwrap_or("FAILED TO PARSE RESPONSE EXAMPLE".to_string());
 
         vec![

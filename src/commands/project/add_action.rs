@@ -1,5 +1,5 @@
 use crate::commands::run::action::RunActionArgs;
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use crate::db::dto::Action;
 use clap::Args;
 use crossterm::style::Stylize;
@@ -39,7 +39,7 @@ pub struct AddActionArgs {
 }
 
 impl AddActionArgs {
-    pub async fn add_action(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
+    pub async fn add_action(&self, db_handler: Box<dyn Db>) -> anyhow::Result<()> {
         let mut action: Action = self.into();
         action.project_name = Some(self.project_name.clone());
 
@@ -54,7 +54,7 @@ impl AddActionArgs {
             ..Default::default()
         };
 
-        action.run_action_args = Some(serde_json::to_string(&r)?);
+        action.run_action_args = Some(r);
 
         let r = db_handler.upsert_action(&action).await;
         match r {

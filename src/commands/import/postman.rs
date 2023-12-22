@@ -1,5 +1,5 @@
 use crate::commands::run::action::RunActionArgs;
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
 use async_recursion::async_recursion;
 use async_trait::async_trait;
@@ -17,11 +17,11 @@ fn replace_postman_path(path: &str) -> &str {
     }
 }
 
-pub struct PostmanImporter<'a> {
-    pub db_handler: &'a DBHandler,
+pub struct PostmanImporter<'a, T: Db> {
+    pub db_handler: &'a T,
 }
 
-impl<'a> PostmanImporter<'a> {
+impl<'a, T: Db + Send + Sync + 'a> PostmanImporter<'a, T> {
     pub fn get_url(url: &Url) -> Option<String> {
         let r = match url {
             v2_1_0::Url::String(s) => s.clone(),
@@ -71,9 +71,7 @@ impl<'a> PostmanImporter<'a> {
                 };
                 Some(Action {
                     name: Some(current_name.to_string()),
-                    run_action_args: Some(
-                        serde_json::to_string(&run_action_args).unwrap_or("{}".to_string()),
-                    ),
+                    run_action_args: Some(run_action_args),
                     project_name: Some(project_name.to_string()),
                     ..Default::default()
                 })
@@ -124,7 +122,7 @@ impl<'a> PostmanImporter<'a> {
 }
 
 #[async_trait]
-impl<'a> Import for PostmanImporter<'a> {
+impl<'a, T: Db + Send + Sync> Import for PostmanImporter<'a, T> {
     async fn import(&self, input: &str, project: &mut Project) -> anyhow::Result<()> {
         let spec = serde_json::from_str::<v2_1_0::Spec>(input);
         if spec.is_err() {

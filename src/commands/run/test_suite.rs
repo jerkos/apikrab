@@ -1,13 +1,10 @@
 use crate::commands::run::_progress_bar::init_progress_bars;
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use crate::db::dto::TestSuiteInstance;
 use crate::http::Api;
 use clap::Args;
 use colored::Colorize;
 use indicatif::MultiProgress;
-use serde_json::from_str;
-
-use super::action::RunActionArgs;
 
 #[derive(Args, Debug, Clone)]
 pub struct TestSuiteArgs {
@@ -23,12 +20,12 @@ impl TestSuiteArgs {
     pub async fn run_test_suite_instance(
         &self,
         api: &Api,
-        db: &DBHandler,
+        db: &Box<dyn Db>,
         test: &TestSuiteInstance,
         multi_progress: &MultiProgress,
         pb: &indicatif::ProgressBar,
     ) -> anyhow::Result<bool> {
-        let mut run_args = from_str::<RunActionArgs>(&test.run_action_args)?;
+        let mut run_args = test.run_action_args.clone();
         run_args.force = true;
         run_args.quiet = !self.debug;
         // disable all saving !
@@ -40,7 +37,7 @@ impl TestSuiteArgs {
         Ok(r.iter().all(|b| *b))
     }
 
-    pub async fn run_test_suite(&self, api: &Api, db: &DBHandler) -> anyhow::Result<()> {
+    pub async fn run_test_suite(&self, api: &Api, db: &Box<dyn Db>) -> anyhow::Result<()> {
         let tests = db.get_test_suite_instance(&self.name).await?;
 
         println!("Running test suite {}", self.name.green());
@@ -51,7 +48,7 @@ impl TestSuiteArgs {
 
         for test in tests {
             let is_success = self
-                .run_test_suite_instance(api, db, &test, &multi, &pb)
+                .run_test_suite_instance(api, &db, &test, &multi, &pb)
                 .await?;
             pb.inc(1);
             results.push(is_success);

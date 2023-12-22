@@ -1,7 +1,7 @@
 use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
 use crate::commands::run::_run_helper::check_input;
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Context, Project, TestSuite, TestSuiteInstance};
 use crate::domain::DomainAction;
 use crate::http;
@@ -13,7 +13,6 @@ use crossterm::style::Stylize;
 use indicatif::{MultiProgress, ProgressBar};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use serde_json::to_string;
 use std::collections::HashMap;
 use std::process::exit;
 use std::time::Duration;
@@ -31,6 +30,7 @@ pub struct R {
 
 pub struct CurrentActionData<'a> {
     name: &'a str,
+    project: Option<&'a str>,
     header: &'a str,
     body: &'a str,
     xtract_path: &'a str,
@@ -77,6 +77,9 @@ impl CurrentActionData<'_> {
 pub struct RunActionArgs {
     /// action name optional
     pub(crate) name: Option<String>,
+
+    #[arg(long)]
+    pub(crate) project: Option<String>,
 
     #[arg(short, long)]
     pub(crate) url: Option<String>,
@@ -183,13 +186,15 @@ impl RunActionArgs {
 
     pub async fn save_if_needed(
         &self,
-        db: &DBHandler,
+        db: &Box<dyn Db>,
         run_action_args: &RunActionArgs,
     ) -> anyhow::Result<()> {
         if let Some(action_name) = &self.save {
             let mut merged = run_action_args.clone();
             if let Some(current_action_name) = &self.name {
-                let action = db.get_action(current_action_name).await?;
+                let action = db
+                    .get_action(current_action_name, self.project.as_deref())
+                    .await?;
                 let run_action_args_from_db = action.get_run_action_args()?;
                 // merge with current run action args
                 merged = merge_with(&run_action_args_from_db, run_action_args);
@@ -198,7 +203,7 @@ impl RunActionArgs {
                 .upsert_action(&Action {
                     id: None,
                     name: Some(action_name.clone()),
-                    run_action_args: Some(serde_json::to_string(&merged)?),
+                    run_action_args: Some(merged.clone()),
                     body_example: None,
                     response_example: None,
                     project_name: None,
@@ -217,7 +222,7 @@ impl RunActionArgs {
 
     async fn save_to_ts_if_needed(
         &self,
-        db: &DBHandler,
+        db: &Box<dyn Db>,
         self_clone: &RunActionArgs,
     ) -> anyhow::Result<()> {
         // save as requested
@@ -235,7 +240,7 @@ impl RunActionArgs {
                     .upsert_test_suite_instance(&TestSuiteInstance {
                         id: None,
                         test_suite_name: ts_name.clone(),
-                        run_action_args: to_string(&self_clone).unwrap(),
+                        run_action_args: self_clone.clone(),
                         created_at: None,
                         updated_at: None,
                     })
@@ -349,6 +354,7 @@ impl RunActionArgs {
         )
         .map(|d| CurrentActionData {
             name: d.0,
+            project: self.project.as_ref().map(|p| p.as_str()),
             header: d.1,
             body: d.2,
             xtract_path: d.3,
@@ -363,7 +369,7 @@ impl RunActionArgs {
     pub async fn run_action<'a>(
         &'a mut self,
         http: &'a http::Api,
-        db: &'a DBHandler,
+        db: &Box<dyn Db>,
         multi: Option<&'a MultiProgress>,
         pb: Option<&'a ProgressBar>,
     ) -> (Vec<R>, Vec<bool>) {
@@ -406,8 +412,14 @@ impl RunActionArgs {
         for current_action_data in self.get_action_data().into_iter() {
             // retrieve action from db if needed
             let (action, project) = (
-                db.get_action(current_action_data.name).await.ok(),
-                DomainAction::project_from_db(current_action_data.name, db).await,
+                db.get_action(current_action_data.name, current_action_data.project)
+                    .await
+                    .ok(),
+                if is_anonymous_action(current_action_data.name) {
+                    None
+                } else {
+                    DomainAction::project_from_db(current_action_data.project, db).await
+                },
             );
 
             // extend configuration if necessary
@@ -475,9 +487,7 @@ impl RunActionArgs {
 
         // saving current session context
         if db
-            .insert_conf(&Context {
-                value: serde_json::to_string(&ctx).expect("Error serializing context"),
-            })
+            .insert_conf(&Context { value: ctx.clone() })
             .await
             .is_err()
         {

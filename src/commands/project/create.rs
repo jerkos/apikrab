@@ -1,6 +1,6 @@
 //use crate::commands::import::openapi::Import;
 use crate::db;
-use crate::db::db_handler::DBHandler;
+use crate::db::db_trait::Db;
 use clap::Args;
 
 #[derive(Args)]
@@ -50,7 +50,7 @@ impl CreateProjectArgs {
         None
     }
     */
-    pub async fn create(&self, db_handler: &DBHandler) -> anyhow::Result<()> {
+    pub async fn create(&self, db_handler: Box<dyn Db>) -> anyhow::Result<()> {
         /*
         match self.get_importer(db_handler) {
             Some((importer, path)) => {

@@ -7,14 +7,15 @@ use std::{
 use crate::{
     commands::run::{
         _progress_bar::{add_progress_bar_for_request, finish_progress_bar},
-        _run_helper::{get_body, get_computed_urls, get_xtracted_path, is_anonymous_action},
+        _run_helper::{get_body, get_computed_urls, get_xtracted_path},
         action::RunActionArgs,
     },
     db::{
-        db_handler::DBHandler,
+        db_trait::Db,
         dto::{Action, History, Project},
     },
     http::{self, Api, FetchResult},
+    python::{run_python_pre_script, PyRequest},
     utils::{
         contains_interpolation, format_query, get_full_url, get_str_as_interpolated_map,
         map_contains_interpolation, parse_multiple_conf_as_opt_with_grouping_and_interpolation,
@@ -25,6 +26,7 @@ use crate::{
 use futures::future;
 use indicatif::MultiProgress;
 use itertools::Itertools;
+use pyo3::PyErr;
 
 #[derive(Debug)]
 pub struct DomainAction {
@@ -75,14 +77,18 @@ impl DomainAction {
         &self,
         computed_url: &str,
         fetch_result: anyhow::Result<&FetchResult, &anyhow::Error>,
-        db: &DBHandler,
+        db: &Box<dyn Db>,
     ) -> anyhow::Result<i64> {
         let f = fetch_result.as_ref();
         db.insert_history(&History {
             id: None,
             action_name: self.name.clone(),
             url: computed_url.to_string(),
-            body: self.body.0.as_ref().map(|s| s.to_string()),
+            body: self
+                .body
+                .0
+                .as_ref()
+                .map(|s| serde_json::from_str(s).unwrap()),
             headers: Some(serde_json::to_string(&self.headers).unwrap()),
             response: f.map(|r| r.response.clone()).ok(),
             status_code: f.map(|r| r.status).unwrap_or(0u16),
@@ -96,13 +102,17 @@ impl DomainAction {
         &self,
         fetch_result: anyhow::Result<&FetchResult, &anyhow::Error>,
         action_opt: Option<Action>,
-        db: &DBHandler,
+        db: &Box<dyn Db>,
     ) -> anyhow::Result<()> {
         match fetch_result.ok().zip(action_opt) {
             Some((f @ FetchResult { response, .. }, ref mut action)) => {
                 if f.is_success() {
-                    action.response_example = Some(response.clone());
-                    action.body_example = self.body.0.clone();
+                    action.response_example = serde_json::from_str(response).ok();
+                    action.body_example = self
+                        .body
+                        .0
+                        .as_ref()
+                        .and_then(|s| serde_json::from_str(s).ok());
                     return db.upsert_action(action).await;
                 }
                 Ok(())
@@ -113,18 +123,25 @@ impl DomainAction {
 
     /// retrieve action from db
     /// return None if anonymous action
-    async fn action_from_db(action_name: &str, db: &DBHandler) -> Option<Action> {
+    /*
+    async fn action_from_db<T: Db>(action_name: &str, db: &T) -> Option<Action> {
         if is_anonymous_action(action_name) {
             None
         } else {
             db.get_action(action_name).await.ok()
         }
     }
+    */
 
     /// retrieve project from db
     /// return None if anonymous action
     /// return None if no project found
-    pub async fn project_from_db(action_name: &str, db: &DBHandler) -> Option<Project> {
+    pub async fn project_from_db(project_name: Option<&str>, db: &Box<dyn Db>) -> Option<Project> {
+        match project_name.as_ref() {
+            Some(p_name) => db.get_project(p_name).await.ok(),
+            None => db.get_project("default").await.ok(),
+        }
+        /*
         if is_anonymous_action(action_name) {
             None
         } else {
@@ -136,6 +153,7 @@ impl DomainAction {
 
             db.get_project(project_name).await.ok()
         }
+        */
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -177,33 +195,63 @@ impl DomainAction {
         }
     }
 
+    pub fn run_hook(
+        &self,
+        python_script: &str,
+        url: &str,
+        query_params: Option<&HashMap<String, String>>,
+    ) -> Result<PyRequest, PyErr> {
+        // run prescript if any
+        let pyrequest = run_python_pre_script(
+            python_script,
+            url,
+            &self.verb,
+            self.headers.as_ref().unwrap_or(&HashMap::new()),
+            query_params,
+            self.body.0.as_ref().map(Cow::from),
+        );
+        if pyrequest.is_err() {
+            println!("Error running python script: {:?}", pyrequest);
+        }
+        pyrequest
+    }
+
     pub async fn run(
         &self,
         action_opt: Option<&Action>,
-        db: &DBHandler,
+        db: &Box<dyn Db>,
         http: &Api,
         multi_progress: &MultiProgress,
     ) -> Vec<(String, anyhow::Result<http::FetchResult>)> {
         future::join_all(self.urls.iter().cartesian_product(&self.query_params).map(
             |(computed_url, query_params)| {
+                let action_cloned = action_opt.cloned();
+
+                let scripted_request = self
+                    .run_hook(&r#""#, computed_url, query_params.as_ref())
+                    .unwrap();
+
                 // add a progress bar
                 let pb = add_progress_bar_for_request(
                     multi_progress,
-                    &format_query(&self.verb, computed_url, query_params.as_ref()),
+                    &format_query(
+                        &scripted_request.verb,
+                        &scripted_request.url,
+                        scripted_request.query_params.as_ref(),
+                    ),
                 );
                 pb.enable_steady_tick(Duration::from_millis(100));
 
-                let action_cloned = action_opt.cloned();
                 async move {
                     // fetch api
                     let fetch_result = http
                         .fetch(
-                            computed_url,
-                            &self.verb,
-                            self.headers.as_ref().unwrap_or(&HashMap::new()),
-                            query_params.as_ref(),
+                            &scripted_request.url,
+                            &scripted_request.verb,
+                            &scripted_request.headers,
+                            scripted_request.query_params.as_ref(),
                             (
-                                self.body.0.as_ref().map(Cow::from),
+                                scripted_request.body.as_ref().map(Cow::from),
                                 self.body.1,
                                 self.body.2,
                             ),

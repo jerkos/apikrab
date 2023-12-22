@@ -38,3 +38,8 @@ tui-textarea = {version = "0.2.4", features=["ratatui-crossterm"], default-featu
 strum = { version = "0.25", features = ["derive"] }
 regex = "1.10.2"
 colored_json = "4.1.0"
+uuid = { version = "1.6.1", features = ["serde", "v4"] }
+
+[dependencies.pyo3]
+version = "0.20.0"
+features = ["auto-initialize"]
