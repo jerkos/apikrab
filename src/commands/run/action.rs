@@ -18,7 +18,7 @@ use std::process::exit;
 use std::time::Duration;
 
 use super::_progress_bar::new_pb;
-use super::_run_helper::{is_anonymous_action, merge_with};
+use super::_run_helper::{is_anonymous_action, is_named_action, merge_with};
 use super::_test_checker::TestChecker;
 
 #[derive(Debug)]
@@ -39,24 +39,23 @@ pub struct CurrentActionData<'a> {
 }
 
 impl CurrentActionData<'_> {
+    fn get_verb_and_url(run_action_args: &RunActionArgs) -> (String, String) {
+        let verb = run_action_args.verb.as_ref().expect("No verb defined !");
+        let url = run_action_args.url.as_ref().expect("No url defined !");
+        (verb.to_owned(), url.to_owned())
+    }
+
     pub fn to_domain_action(
         &self,
-        run_action_args: &RunActionArgs,
+        run_action_args: RunActionArgs,
         project: Option<&Project>,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
+        let (verb, url) = Self::get_verb_and_url(&run_action_args);
         DomainAction::from_current_action_data(
             self.name,
-            run_action_args
-                .verb
-                .as_ref()
-                .expect("No verb defined !")
-                .as_str(),
-            run_action_args
-                .url
-                .as_ref()
-                .expect("No url defined !")
-                .as_str(),
+            verb.as_str(),
+            url.as_str(),
             val_or_join(self.header, run_action_args.header.as_ref()).as_ref(),
             (
                 self.body,
@@ -67,7 +66,7 @@ impl CurrentActionData<'_> {
             val_or_join(self.path_params, run_action_args.path_params.as_ref()).as_ref(),
             val_or_join(self.query_params, run_action_args.query_params.as_ref()).as_ref(),
             project,
-            None,
+            run_action_args,
             ctx,
         )
     }
@@ -207,8 +206,8 @@ impl RunActionArgs {
                     body_example: None,
                     response_example: None,
                     project_name: None,
-                    created_at: None,
-                    updated_at: None,
+                    created_at: Some(chrono::Utc::now().naive_utc()),
+                    updated_at: Some(chrono::Utc::now().naive_utc()),
                 })
                 .await;
 
@@ -219,7 +218,7 @@ impl RunActionArgs {
         };
         Ok(())
     }
-
+    /// Save the action to a test suite if the parameter is present
     async fn save_to_ts_if_needed(
         &self,
         db: &Box<dyn Db>,
@@ -408,7 +407,7 @@ impl RunActionArgs {
         // prepare the data
         let _ = self.prepare();
 
-        // iterating over actions in current actions
+        // iterating possible action if it is a chained action
         for current_action_data in self.get_action_data().into_iter() {
             // retrieve action from db if needed
             let (action, project) = (
@@ -431,34 +430,40 @@ impl RunActionArgs {
             );
 
             // retrieve run action args
-            let run_action_args_ac = action
+            let current_or_loaded_run_action_args = action
                 .as_ref()
                 .map(|a| a.get_run_action_args().expect("Error loading action"))
                 .unwrap_or(self.clone());
 
-            let mut runnable_action =
-                current_action_data.to_domain_action(&run_action_args_ac, project.as_ref(), &ctx);
-            runnable_action.run_action_args = Some(run_action_args_ac);
+            let mut runnable_action = current_action_data.to_domain_action(
+                current_or_loaded_run_action_args,
+                project.as_ref(),
+                &ctx,
+            );
 
-            if let Some(run_action_args) = runnable_action.run_action_args.as_mut() {
-                if !is_anonymous_action(&runnable_action.name) && run_action_args.chain.is_some() {
-                    // inherit some sane configuration
-                    run_action_args.save = None;
-                    run_action_args.save_to_ts = None;
-                    run_action_args.quiet = self.quiet;
-                    run_action_args.grep = self.grep;
-                    let (r, _) = run_action_args
-                        .run_action(http, db, Some(&multi_bar), Some(&main_pb))
-                        .await;
-                    action_results.push(r);
-                    main_pb.inc(1);
-                    continue;
-                }
-            }
-
-            if !runnable_action.can_be_run() {
+            // if it is a named action and chain is defined we perform a recurse call
+            let run_action_args = &mut runnable_action.run_action_args;
+            if is_named_action(&runnable_action.name) && run_action_args.chain.is_some() {
+                // inherit some sane configuration
+                run_action_args.save = None;
+                run_action_args.save_to_ts = None;
+                run_action_args.quiet = self.quiet;
+                run_action_args.grep = self.grep;
+                let (r, _) = run_action_args
+                    .run_action(http, db, Some(&multi_bar), Some(&main_pb))
+                    .await;
+                action_results.push(r);
+                main_pb.inc(1);
                 continue;
             }
+
+            // check if it can be run
+            if !runnable_action.can_be_run() {
+                printer.p_info(|| println!("Action cannot be run due to missing information"));
+                continue;
+            }
+
+            // run the action and push the result in the stack
             action_results.push(
                 runnable_action
                     .run(action.as_ref(), db, http, &multi_bar)

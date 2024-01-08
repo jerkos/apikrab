@@ -16,6 +16,10 @@ pub fn is_anonymous_action(action_name: &str) -> bool {
     action_name == ANONYMOUS_ACTION
 }
 
+pub fn is_named_action(action_name: &str) -> bool {
+    !is_anonymous_action(action_name)
+}
+
 /// Check arguments, could be probably done with clap
 /// but I'm too lazy to do it
 pub(crate) fn check_input(run_action_args: &RunActionArgs) -> anyhow::Result<()> {
@@ -106,7 +110,12 @@ fn complete_url(url: &str) -> Cow<str> {
 
 fn get_full_url<'a>(project_url: Option<&'a str>, action_url: &'a str) -> Cow<'a, str> {
     match project_url {
-        Some(main_url) => Cow::Owned(format!("{}/{}", complete_url(main_url), action_url)),
+        Some(main_url) => {
+            if main_url.is_empty() {
+                return complete_url(action_url);
+            }
+            Cow::Owned(format!("{}/{}", complete_url(main_url), action_url))
+        }
         None => complete_url(action_url),
     }
 }

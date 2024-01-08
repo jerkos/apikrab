@@ -10,7 +10,7 @@ use sqlx::{FromRow, Row};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct Project {
     pub(crate) id: Option<i64>,
     pub(crate) name: String,

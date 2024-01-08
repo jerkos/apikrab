@@ -118,7 +118,6 @@ async fn main() -> anyhow::Result<()> {
     // init database if needed
     let db_handler = get_db().await;
 
-    println!("there");
     // parse cli args
     let mut cli: Cli = Cli::parse();
 

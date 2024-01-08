@@ -123,8 +123,14 @@ impl Db for SqliteDb {
         let project_opt = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE name = ?1")
             .bind(project_name)
             .fetch_optional(self.get_conn())
-            .await?;
-        project_opt.ok_or(anyhow::anyhow!(PROJECT_NOT_FOUND.red()))
+            .await?
+            .or_else(|| {
+                Some(Project {
+                    name: project_name.to_string(),
+                    ..Default::default()
+                })
+            });
+        project_opt.ok_or(anyhow::anyhow!(PROJECT_NOT_FOUND))
     }
 
     /// create a new project with the given name

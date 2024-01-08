@@ -37,7 +37,7 @@ pub struct DomainAction {
     pub(crate) query_params: Vec<Option<HashMap<String, String>>>,
     pub(crate) body: (Option<String>, bool, bool),
     pub(crate) extract_path: Option<HashMap<String, Option<String>>>,
-    pub(crate) run_action_args: Option<RunActionArgs>,
+    pub(crate) run_action_args: RunActionArgs,
 }
 
 impl DomainAction {
@@ -121,39 +121,14 @@ impl DomainAction {
         }
     }
 
-    /// retrieve action from db
-    /// return None if anonymous action
-    /*
-    async fn action_from_db<T: Db>(action_name: &str, db: &T) -> Option<Action> {
-        if is_anonymous_action(action_name) {
-            None
-        } else {
-            db.get_action(action_name).await.ok()
-        }
-    }
-    */
-
     /// retrieve project from db
     /// return None if anonymous action
-    /// return None if no project found
+    /// return Default project if no project found
     pub async fn project_from_db(project_name: Option<&str>, db: &Box<dyn Db>) -> Option<Project> {
         match project_name.as_ref() {
             Some(p_name) => db.get_project(p_name).await.ok(),
             None => db.get_project("default").await.ok(),
         }
-        /*
-        if is_anonymous_action(action_name) {
-            None
-        } else {
-            let action = Self::action_from_db(action_name, db).await;
-            let project_name = action
-                .as_ref()
-                .and_then(|a| a.project_name.as_deref())
-                .unwrap_or("__DEFAULT__");
-
-            db.get_project(project_name).await.ok()
-        }
-        */
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -167,7 +142,7 @@ impl DomainAction {
         path_params: &str,
         query_params: &str,
         project: Option<&Project>,
-        run_action_args: Option<RunActionArgs>,
+        run_action_args: RunActionArgs,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
         DomainAction {
