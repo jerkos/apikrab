@@ -24,7 +24,8 @@ impl<'a, T: Db> OpenapiV3Importer<'a, T> {
                 .operation_id
                 .clone()
                 .map(|_| format!("{}-{}", verb, path)),
-            run_action_args: Some(run_action_args),
+            actions: vec![],
+            // run_action_args: Some(run_action_args),
             project_name: Some(project_name.to_string()),
             ..Default::default()
         }

@@ -6,9 +6,12 @@ use std::{
 
 use crate::{
     commands::run::{
+        _http_result::HttpResult,
+        _printer::Printer,
         _progress_bar::{add_progress_bar_for_request, finish_progress_bar},
         _run_helper::{get_body, get_computed_urls, get_xtracted_path},
-        action::RunActionArgs,
+        _test_checker::TestChecker,
+        action::R,
     },
     db::{
         db_trait::Db,
@@ -18,17 +21,18 @@ use crate::{
     python::{run_python_pre_script, PyRequest},
     utils::{
         contains_interpolation, format_query, get_full_url, get_str_as_interpolated_map,
-        map_contains_interpolation, parse_multiple_conf_as_opt_with_grouping_and_interpolation,
-        Interpol,
+        map_contains_interpolation, parse_cli_conf_to_map,
+        parse_multiple_conf_as_opt_with_grouping_and_interpolation, Interpol,
     },
 };
 
 use futures::future;
-use indicatif::MultiProgress;
+use indicatif::{MultiProgress, ProgressBar};
 use itertools::Itertools;
 use pyo3::PyErr;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct DomainAction {
     pub(crate) name: String,
     pub(crate) verb: String,
@@ -37,10 +41,41 @@ pub struct DomainAction {
     pub(crate) query_params: Vec<Option<HashMap<String, String>>>,
     pub(crate) body: (Option<String>, bool, bool),
     pub(crate) extract_path: Option<HashMap<String, Option<String>>>,
-    pub(crate) run_action_args: RunActionArgs,
+    pub(crate) expect: Option<HashMap<String, String>>,
 }
 
 impl DomainAction {
+    pub fn merge_with(&self, other: &DomainAction) -> DomainAction {
+        // merge two domain actions into a new one
+        // the new one will have the same name as the first one
+        DomainAction {
+            name: self.name.clone(),
+            verb: if !other.verb.is_empty() {
+                other.verb.clone()
+            } else {
+                self.verb.clone()
+            },
+            headers: other.headers.clone().or(self.headers.clone()),
+            urls: if other.urls.is_empty() {
+                self.urls.clone()
+            } else {
+                other.urls.clone()
+            },
+            query_params: if !other.query_params.is_empty() {
+                other.query_params.clone()
+            } else {
+                self.query_params.clone()
+            },
+            body: if other.body.0.is_some() {
+                other.body.clone()
+            } else {
+                self.body.clone()
+            },
+            extract_path: other.extract_path.clone().or(self.extract_path.clone()),
+            expect: other.expect.clone().or(self.expect.clone()),
+        }
+    }
+
     /// check if an action can be run
     pub fn can_be_run(&self) -> bool {
         let mut can_be_ran = true;
@@ -141,8 +176,8 @@ impl DomainAction {
         xtract_path: &str,
         path_params: &str,
         query_params: &str,
+        expect: Option<&Vec<String>>,
         project: Option<&Project>,
-        run_action_args: RunActionArgs,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
         DomainAction {
@@ -166,7 +201,7 @@ impl DomainAction {
                 Interpol::MultiInterpol,
             ),
             extract_path: get_xtracted_path(xtract_path, true, ctx),
-            run_action_args,
+            expect: parse_cli_conf_to_map(expect),
         }
     }
 
@@ -189,6 +224,47 @@ impl DomainAction {
             println!("Error running python script: {:?}", pyrequest);
         }
         pyrequest
+    }
+
+    pub async fn run_with_tests(
+        &self,
+        action_opt: Option<&Action>,
+        ctx: &mut HashMap<String, String>,
+        db: &Box<dyn Db>,
+        http: &Api,
+        printer: &mut Printer,
+        multi_progress: &MultiProgress,
+        main_pb: &ProgressBar,
+    ) -> Vec<bool> {
+        let fetch_results = self
+            .run(action_opt, db, http, &multi_progress)
+            .await
+            .into_iter()
+            .map(|(url, result)| {
+                // print information on screen if needed
+                let _ = HttpResult {
+                    fetch_result: result.as_ref(),
+                    printer,
+                }
+                .handle_result(self.extract_path.as_ref(), ctx, &main_pb);
+                // returning result
+                R {
+                    url,
+                    result,
+                    ctx: ctx.clone(),
+                }
+            })
+            .collect_vec();
+
+        if let Some(ref expected) = self.expect {
+            return TestChecker {
+                fetch_results: &fetch_results,
+                ctx,
+                expected,
+            }
+            .check(&self.name, main_pb);
+        }
+        fetch_results.iter().map(|_| true).collect_vec()
     }
 
     pub async fn run(
@@ -240,9 +316,11 @@ impl DomainAction {
                         pb.println(format!("[ERROR] {}", e));
                     }
 
-                    let _ = self
-                        .upsert_action(fetch_result.as_ref(), action_cloned, db)
-                        .await;
+                    if action_cloned.is_some() {
+                        let _ = self
+                            .upsert_action(fetch_result.as_ref(), action_cloned, db)
+                            .await;
+                    }
 
                     finish_progress_bar(
                         &pb,

@@ -128,7 +128,7 @@ impl<'a> ProjectUI<'a> {
     fn build_ui<B: Backend>(&mut self, frame: &mut Frame<B>) -> io::Result<()> {
         let main_layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(vec![Percentage(40), Percentage(60), Min(0)])
+            .constraints(vec![Percentage(30), Percentage(70), Min(0)])
             .split(frame.size());
 
         let project_list = List::new(
@@ -181,16 +181,11 @@ impl<'a> ProjectUI<'a> {
                 .items
                 .iter()
                 .map(|a| {
-                    let r = a
-                        .get_run_action_args()
-                        .expect("Error getting run action args");
-                    let v = r.verb.unwrap_or("UNKNOWN".to_string());
-                    let url = r.url.unwrap_or("UNKNOWN".to_string());
+                    let r = &a.actions[0];
+                    let v = &r.verb;
+                    let url = r.urls.iter().next().cloned().unwrap_or_default();
                     ListItem::new(vec![
-                        Line::styled(
-                            r.name.unwrap_or("UNKNOWN".to_string()),
-                            Style::default().fg(Color::LightGreen).bold(),
-                        ),
+                        Line::styled(&r.name, Style::default().fg(Color::LightGreen).bold()),
                         Line::from(vec![
                             Span::raw("    "),
                             match v.as_str() {
@@ -229,9 +224,9 @@ impl<'a> ProjectUI<'a> {
                             Span::styled(url, Style::default().fg(Color::LightBlue)),
                             Span::raw(" "),
                             Span::styled(
-                                if r.form_data {
+                                if r.body.1 {
                                     "(form)"
-                                } else if r.url_encoded {
+                                } else if r.body.2 {
                                     "(url encoded)"
                                 } else {
                                     "(json)"

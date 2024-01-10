@@ -1,6 +1,6 @@
 use crate::commands::project::add_action::AddActionArgs;
 use crate::commands::project::create::CreateProjectArgs;
-use crate::commands::run::action::RunActionArgs;
+use crate::domain::DomainAction;
 use crate::utils::parse_cli_conf_to_map;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -81,9 +81,9 @@ impl From<&CreateProjectArgs> for Project {
 pub struct Action {
     pub(crate) id: Option<i64>,
     pub(crate) name: Option<String>,
-    // when basically add an action to a project
-    // this can be empty
-    pub(crate) run_action_args: Option<RunActionArgs>,
+    // chain actions
+    pub(crate) actions: Vec<DomainAction>,
+
     // metadata
     pub(crate) body_example: Option<Value>,
     pub(crate) response_example: Option<Value>,
@@ -94,20 +94,9 @@ pub struct Action {
     pub(crate) updated_at: Option<chrono::NaiveDateTime>,
 }
 
-// todo use an intermediate struct to parse run_action_args
 impl Action {
-    pub fn get_run_action_args(&self) -> anyhow::Result<RunActionArgs> {
-        match self.run_action_args.as_ref() {
-            Some(raa) => Ok(raa.clone()),
-            None => Err(anyhow::anyhow!("No run action args for action")),
-        }
-    }
-    // try parse headers as a map
-    pub fn get_headers(&self) -> anyhow::Result<HashMap<String, String>> {
-        match self.get_run_action_args() {
-            Ok(r) => Ok(parse_cli_conf_to_map(r.header.as_ref()).unwrap()),
-            Err(e) => anyhow::bail!(e),
-        }
+    pub fn is_chained_action(&self) -> bool {
+        self.actions.len() > 1
     }
 }
 
@@ -116,7 +105,7 @@ impl FromRow<'_, SqliteRow> for Action {
         Ok(Action {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            run_action_args: serde_json::from_str(row.try_get("run_action_args")?)
+            actions: serde_json::from_str(row.try_get("actions")?)
                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
             body_example: serde_json::from_str(row.try_get("body_example")?)
                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
@@ -140,7 +129,7 @@ impl From<&AddActionArgs> for Action {
             // action is none because it's not in db yet
             id: None,
             name: Some(add_action_args.name.clone()),
-            run_action_args: None,
+            actions: vec![],
             body_example: None,
             response_example: None,
             project_name: Some(add_action_args.project_name.clone()),
@@ -152,32 +141,13 @@ impl From<&AddActionArgs> for Action {
 
 impl Display for Action {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let run_actions_args = self
-            .get_run_action_args()
-            .expect("Error getting run action args");
         write!(
             f,
-            "{} {} {} {}",
-            run_actions_args
-                .name
+            "{}",
+            self.name
+                .as_ref()
                 .map(|n| n.green())
                 .unwrap_or("UNKNOWN".green()),
-            run_actions_args
-                .verb
-                .map(|v| v.cyan())
-                .unwrap_or("default".cyan()),
-            run_actions_args
-                .url
-                .map(|u| u.yellow())
-                .unwrap_or("default".yellow()),
-            self.get_headers()
-                .unwrap_or_else(|_| HashMap::new())
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
-                .collect::<Vec<String>>()
-                .join(", ")
-                .bold()
-                .blue(),
         )
     }
 }
@@ -251,7 +221,7 @@ pub struct TestSuite {
 pub struct TestSuiteInstance {
     pub(crate) id: Option<i64>,
     pub(crate) test_suite_name: String,
-    pub(crate) run_action_args: RunActionArgs,
+    pub(crate) actions: Vec<DomainAction>,
     pub(crate) created_at: Option<chrono::NaiveDateTime>,
     pub(crate) updated_at: Option<chrono::NaiveDateTime>,
 }
@@ -261,7 +231,7 @@ impl FromRow<'_, SqliteRow> for TestSuiteInstance {
         Ok(TestSuiteInstance {
             id: row.try_get("id")?,
             test_suite_name: row.try_get("test_suite_name")?,
-            run_action_args: serde_json::from_str(row.try_get("run_action_args")?)
+            actions: serde_json::from_str(row.try_get("actions")?)
                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,

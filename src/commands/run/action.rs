@@ -1,4 +1,3 @@
-use crate::commands::run::_http_result::HttpResult;
 use crate::commands::run::_printer::Printer;
 use crate::commands::run::_run_helper::check_input;
 use crate::db::db_trait::Db;
@@ -6,9 +5,8 @@ use crate::db::dto::{Action, Context, Project, TestSuite, TestSuiteInstance};
 use crate::domain::DomainAction;
 use crate::http;
 use crate::http::FetchResult;
-use crate::utils::{parse_cli_conf_to_map, val_or_join, SEP, SINGLE_INTERPOL_START};
+use crate::utils::{val_or_join, SEP, SINGLE_INTERPOL_START};
 use clap::Args;
-use core::panic;
 use crossterm::style::Stylize;
 use indicatif::{MultiProgress, ProgressBar};
 use itertools::Itertools;
@@ -18,8 +16,7 @@ use std::process::exit;
 use std::time::Duration;
 
 use super::_progress_bar::new_pb;
-use super::_run_helper::{is_anonymous_action, is_named_action, merge_with};
-use super::_test_checker::TestChecker;
+use super::_run_helper::is_anonymous_action;
 
 #[derive(Debug)]
 pub struct R {
@@ -39,23 +36,34 @@ pub struct CurrentActionData<'a> {
 }
 
 impl CurrentActionData<'_> {
-    fn get_verb_and_url(run_action_args: &RunActionArgs) -> (String, String) {
-        let verb = run_action_args.verb.as_ref().expect("No verb defined !");
-        let url = run_action_args.url.as_ref().expect("No url defined !");
-        (verb.to_owned(), url.to_owned())
+    fn get_verb_and_url(run_action_args: &RunActionArgs) -> (&str, &str) {
+        let verb = run_action_args
+            .verb
+            .as_ref()
+            .map(String::as_str)
+            .unwrap_or(&"");
+        let url = run_action_args
+            .url
+            .as_ref()
+            .map(String::as_str)
+            .unwrap_or(&"");
+        (verb, url)
+        // (verb.to_owned(), url.to_owned())
     }
 
     pub fn to_domain_action(
         &self,
-        run_action_args: RunActionArgs,
+        run_action_args: &RunActionArgs,
         project: Option<&Project>,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
+        println!("run action args: {:?}", run_action_args);
         let (verb, url) = Self::get_verb_and_url(&run_action_args);
+        println!("verb: {}, url: {}", verb, url);
         DomainAction::from_current_action_data(
             self.name,
-            verb.as_str(),
-            url.as_str(),
+            verb,
+            url,
             val_or_join(self.header, run_action_args.header.as_ref()).as_ref(),
             (
                 self.body,
@@ -65,8 +73,8 @@ impl CurrentActionData<'_> {
             val_or_join(self.xtract_path, run_action_args.extract_path.as_ref()).as_ref(),
             val_or_join(self.path_params, run_action_args.path_params.as_ref()).as_ref(),
             val_or_join(self.query_params, run_action_args.query_params.as_ref()).as_ref(),
+            run_action_args.expect.as_ref(),
             project,
-            run_action_args,
             ctx,
         )
     }
@@ -83,7 +91,7 @@ pub struct RunActionArgs {
     #[arg(short, long)]
     pub(crate) url: Option<String>,
 
-    #[arg(short, long, value_parser = ["GET", "POST", "PUT", "DELETE"])]
+    #[arg(long, value_parser = ["GET", "POST", "PUT", "DELETE"])]
     pub(crate) verb: Option<String>,
 
     /// path params separated by a ,
@@ -160,49 +168,17 @@ pub struct RunActionArgs {
 }
 
 impl RunActionArgs {
-    pub async fn run_test_if_needed(
-        &self,
-        action_results: &[Vec<R>],
-        ctx: &HashMap<String, String>,
-        main_pb: &ProgressBar,
-    ) -> Vec<bool> {
-        // if expect run test check
-        let last_results = action_results.last();
-        let mut tests_is_success = vec![];
-        if let Some(lr) = last_results {
-            let expected = parse_cli_conf_to_map(self.expect.as_ref());
-            if let Some(ex) = &expected {
-                tests_is_success = TestChecker {
-                    fetch_results: lr,
-                    ctx,
-                    expected: ex,
-                }
-                .check(self.name.as_deref().unwrap_or("flow"), main_pb);
-            }
-        }
-        tests_is_success
-    }
-
     pub async fn save_if_needed(
         &self,
         db: &Box<dyn Db>,
-        run_action_args: &RunActionArgs,
+        actions: &Vec<DomainAction>,
     ) -> anyhow::Result<()> {
         if let Some(action_name) = &self.save {
-            let mut merged = run_action_args.clone();
-            if let Some(current_action_name) = &self.name {
-                let action = db
-                    .get_action(current_action_name, self.project.as_deref())
-                    .await?;
-                let run_action_args_from_db = action.get_run_action_args()?;
-                // merge with current run action args
-                merged = merge_with(&run_action_args_from_db, run_action_args);
-            }
             let r = db
                 .upsert_action(&Action {
                     id: None,
                     name: Some(action_name.clone()),
-                    run_action_args: Some(merged.clone()),
+                    actions: actions.clone(),
                     body_example: None,
                     response_example: None,
                     project_name: None,
@@ -222,7 +198,7 @@ impl RunActionArgs {
     async fn save_to_ts_if_needed(
         &self,
         db: &Box<dyn Db>,
-        self_clone: &RunActionArgs,
+        actions: &Vec<DomainAction>,
     ) -> anyhow::Result<()> {
         // save as requested
         match &self.save_to_ts {
@@ -239,7 +215,7 @@ impl RunActionArgs {
                     .upsert_test_suite_instance(&TestSuiteInstance {
                         id: None,
                         test_suite_name: ts_name.clone(),
-                        run_action_args: self_clone.clone(),
+                        actions: actions.clone(),
                         created_at: None,
                         updated_at: None,
                     })
@@ -337,11 +313,6 @@ impl RunActionArgs {
     }
 
     pub fn get_action_data(&self) -> Vec<CurrentActionData> {
-        // check input and return an error if needed
-        if let Err(msg) = check_input(self) {
-            eprintln!("{}", msg);
-            panic!("Invalid input");
-        }
         // check if action is chained
         itertools::izip!(
             self.chain.as_ref().map(|c| c.iter()).unwrap(),
@@ -364,24 +335,20 @@ impl RunActionArgs {
     }
 
     /// Main function for running an action
-    #[async_recursion::async_recursion]
     pub async fn run_action<'a>(
         &'a mut self,
         http: &'a http::Api,
         db: &Box<dyn Db>,
         multi: Option<&'a MultiProgress>,
         pb: Option<&'a ProgressBar>,
-    ) -> (Vec<R>, Vec<bool>) {
-        // make a clone a the beginning as we mutate
-        // this instance latter in prepare method
-        let self_clone = self.clone();
-
+    ) -> Vec<Vec<bool>> {
         // check input and return an error if needed
         if let Err(msg) = check_input(self) {
             eprintln!("{}", msg);
             exit(1);
         }
 
+        println!("Running action: {:?}", self);
         // creating a new context hashmap for storing extracted values
         let mut ctx: HashMap<String, String> = match db.get_conf().await {
             Ok(ctx) => ctx.get_value(),
@@ -402,10 +369,11 @@ impl RunActionArgs {
             main_pb
         });
 
-        let mut action_results = vec![];
-
         // prepare the data
         let _ = self.prepare();
+
+        let mut actions = vec![];
+        let mut final_results = vec![];
 
         // iterating possible action if it is a chained action
         for current_action_data in self.get_action_data().into_iter() {
@@ -429,65 +397,59 @@ impl RunActionArgs {
                     .unwrap_or(HashMap::new()),
             );
 
-            // retrieve run action args
-            let current_or_loaded_run_action_args = action
-                .as_ref()
-                .map(|a| a.get_run_action_args().expect("Error loading action"))
-                .unwrap_or(self.clone());
+            // retrieve action stored in db
+            let runnable_actions_from_db = action.as_ref().map(|a| &a.actions);
 
-            let mut runnable_action = current_action_data.to_domain_action(
-                current_or_loaded_run_action_args,
-                project.as_ref(),
-                &ctx,
-            );
-
-            // if it is a named action and chain is defined we perform a recurse call
-            let run_action_args = &mut runnable_action.run_action_args;
-            if is_named_action(&runnable_action.name) && run_action_args.chain.is_some() {
-                // inherit some sane configuration
-                run_action_args.save = None;
-                run_action_args.save_to_ts = None;
-                run_action_args.quiet = self.quiet;
-                run_action_args.grep = self.grep;
-                let (r, _) = run_action_args
-                    .run_action(http, db, Some(&multi_bar), Some(&main_pb))
-                    .await;
-                action_results.push(r);
-                main_pb.inc(1);
-                continue;
-            }
-
-            // check if it can be run
-            if !runnable_action.can_be_run() {
-                printer.p_info(|| println!("Action cannot be run due to missing information"));
-                continue;
-            }
-
-            // run the action and push the result in the stack
-            action_results.push(
-                runnable_action
-                    .run(action.as_ref(), db, http, &multi_bar)
-                    .await
-                    .into_iter()
-                    .map(|(url, result)| {
-                        let _ = HttpResult {
-                            fetch_result: result.as_ref(),
-                            printer: &mut printer,
-                        }
-                        .handle_result(
-                            runnable_action.extract_path.as_ref(),
-                            &mut ctx,
-                            &main_pb,
+            // merge if needed with current action
+            let runnable_actions = match &runnable_actions_from_db {
+                Some(runnable_actions) => {
+                    // need to merge with current action if runnable action has length one
+                    if runnable_actions.len() == 1 {
+                        let merged = runnable_actions[0].merge_with(
+                            &current_action_data.to_domain_action(self, project.as_ref(), &ctx),
                         );
-                        R {
-                            url,
-                            result,
-                            ctx: ctx.clone(),
-                        }
-                    })
-                    .collect::<Vec<R>>(),
-            );
-            main_pb.inc(1);
+                        vec![merged]
+                    } else {
+                        runnable_actions
+                            .iter()
+                            .map(|a| a.clone())
+                            .collect::<Vec<DomainAction>>()
+                    }
+                }
+                None => {
+                    // got an anonymous action so we need to create a new one
+                    vec![current_action_data.to_domain_action(self, project.as_ref(), &ctx)]
+                }
+            };
+
+            // keeping track of all computed actions
+            actions.extend(runnable_actions.iter().map(|a| a.clone()));
+
+            // running each actions
+            for runnable_action in runnable_actions.iter() {
+                // check if it can be run
+                if !runnable_action.can_be_run() {
+                    printer.p_info(|| println!("Action cannot be run due to missing information"));
+                    continue;
+                }
+
+                // run the action and push the result in the stack
+                final_results.push(
+                    runnable_action
+                        .run_with_tests(
+                            action.as_ref(),
+                            &mut ctx,
+                            db,
+                            http,
+                            &mut printer,
+                            &multi_bar,
+                            &main_pb,
+                        )
+                        .await,
+                );
+
+                main_pb.inc(1);
+            } // end for
         } // end for
 
         // saving current session context
@@ -498,20 +460,13 @@ impl RunActionArgs {
         {
             main_pb.println("Error inserting context");
         }
-        // if expect run test check
-        let test_results = self
-            .run_test_if_needed(&action_results, &ctx, &main_pb)
-            .await;
 
         // finishing progress bar
         main_pb.finish();
+        println!("{:?}", actions);
+        let _ = self.save_if_needed(db, &actions).await;
+        let _ = self.save_to_ts_if_needed(db, &actions).await;
 
-        let _ = self.save_if_needed(db, &self_clone).await;
-        let _ = self.save_to_ts_if_needed(db, &self_clone).await;
-
-        (
-            action_results.into_iter().flatten().collect_vec(),
-            test_results,
-        )
+        final_results
     }
 }

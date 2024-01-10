@@ -1,4 +1,3 @@
-use crate::commands::run::action::RunActionArgs;
 use crate::db::db_trait::Db;
 use crate::db::dto::Action;
 use clap::Args;
@@ -43,6 +42,7 @@ impl AddActionArgs {
         let mut action: Action = self.into();
         action.project_name = Some(self.project_name.clone());
 
+        /*
         let r = RunActionArgs {
             name: Some(self.name.clone()),
             url: Some(self.url.clone()),
@@ -53,8 +53,9 @@ impl AddActionArgs {
             url_encoded: self.url_encoded,
             ..Default::default()
         };
+        */
 
-        action.run_action_args = Some(r);
+        action.actions = vec![];
 
         let r = db_handler.upsert_action(&action).await;
         match r {

@@ -9,15 +9,11 @@ use std::collections::{HashMap, HashSet};
 
 use super::action::RunActionArgs;
 
-static ANONYMOUS_ACTION: &str = "UNKNOWN";
+pub static ANONYMOUS_ACTION: &str = "UNKNOWN";
 
 /// Check if action is anonymous
 pub fn is_anonymous_action(action_name: &str) -> bool {
     action_name == ANONYMOUS_ACTION
-}
-
-pub fn is_named_action(action_name: &str) -> bool {
-    !is_anonymous_action(action_name)
 }
 
 /// Check arguments, could be probably done with clap
@@ -129,6 +125,10 @@ pub fn get_computed_urls(
     action_url: &str,
     ctx: &HashMap<String, String>,
 ) -> HashSet<String> {
+    if action_url.is_empty() {
+        return HashSet::new();
+    }
+
     let full_url = get_full_url(project_url, action_url).into_owned();
 
     // returning url with no interpolation
@@ -181,60 +181,6 @@ pub fn get_xtracted_path(
         return None;
     }
     Some(value)
-}
-
-/// Merge cli args with db args
-/// Usually db args are overridden by cli args
-///
-/// ```rust
-/// let mut run_action_args = RunActionArgs::default();
-/// let o = RunActionArgs {
-///    verb: Some("GET".to_string()),
-///   body: Some("".to_string()),
-/// };
-/// merge_with(&mut run_action_args, &o);
-/// ```
-pub fn merge_with(run_actions_args: &RunActionArgs, o: &RunActionArgs) -> RunActionArgs {
-    let mut clone = run_actions_args.clone();
-    if o.verb.is_some() {
-        clone.verb = o.verb.clone();
-    }
-    if o.body.is_some() {
-        clone.body = o.body.clone();
-    }
-    if o.path_params.is_some() {
-        clone.path_params = o.path_params.clone();
-    }
-    if o.query_params.is_some() {
-        clone.query_params = o.query_params.clone();
-    }
-    if o.header.is_some() {
-        clone.header = o.header.clone();
-    }
-
-    if o.chain.is_some() {
-        clone.chain = o.chain.clone();
-    }
-
-    if o.name.is_some() {
-        clone.name = o.name.clone();
-    }
-    if o.extract_path.is_some() {
-        clone.extract_path = o.extract_path.clone();
-    }
-    if o.url.is_some() {
-        clone.url = o.url.clone();
-    }
-    if o.expect.is_some() {
-        clone.expect = o.expect.clone();
-    }
-    if o.form_data {
-        clone.form_data = o.form_data;
-    }
-    if o.url_encoded {
-        clone.url_encoded = o.url_encoded;
-    }
-    clone
 }
 
 #[cfg(test)]

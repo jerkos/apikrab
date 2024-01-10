@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use crate::commands::run::_printer::Printer;
 use crate::commands::run::_progress_bar::init_progress_bars;
 use crate::db::db_trait::Db;
 use crate::db::dto::TestSuiteInstance;
@@ -19,22 +22,29 @@ pub struct TestSuiteArgs {
 impl TestSuiteArgs {
     pub async fn run_test_suite_instance(
         &self,
+        test: &TestSuiteInstance,
         api: &Api,
         db: &Box<dyn Db>,
-        test: &TestSuiteInstance,
+        printer: &mut Printer,
         multi_progress: &MultiProgress,
         pb: &indicatif::ProgressBar,
     ) -> anyhow::Result<bool> {
-        let mut run_args = test.run_action_args.clone();
-        run_args.force = true;
-        run_args.quiet = !self.debug;
-        // disable all saving !
-        run_args.save = None;
-        run_args.save_to_ts = None;
-        let (_, r) = run_args
-            .run_action(api, db, Some(multi_progress), Some(pb))
-            .await;
-        Ok(r.iter().all(|b| *b))
+        let mut ctx = HashMap::new();
+        for action in &test.actions {
+            let r = action
+                .run_with_tests(None, &mut ctx, db, api, printer, multi_progress, pb)
+                .await;
+            // disable all saving !
+            if !r.iter().all(|b| *b) {
+                println!(
+                    "Test suite {} failed on action {}",
+                    self.name.red(),
+                    action.name.red()
+                );
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub async fn run_test_suite(&self, api: &Api, db: &Box<dyn Db>) -> anyhow::Result<()> {
@@ -44,11 +54,14 @@ impl TestSuiteArgs {
         let mut results: Vec<bool> = vec![];
 
         let (multi, pb) = init_progress_bars(tests.len() as u64);
-        // pb.enable_steady_tick(Duration::from_millis(100));
+
+        // create a global printer
+        let mut printer = Printer::new(!self.debug, false, false);
 
         for test in tests {
+            // create a ctx for each test
             let is_success = self
-                .run_test_suite_instance(api, &db, &test, &multi, &pb)
+                .run_test_suite_instance(&test, api, &db, &mut printer, &multi, &pb)
                 .await?;
             pb.inc(1);
             results.push(is_success);

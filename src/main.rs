@@ -107,7 +107,9 @@ async fn run_wrapper(
     db_handler: &Box<dyn Db>,
 ) {
     let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
-    run_action_args.verb = v.map(|v| v.to_string());
+    if v.is_some() {
+        run_action_args.verb = v.map(|v| v.to_string());
+    }
     let _ = run_action_args
         .run_action(&requester, db_handler, None, None)
         .await;
@@ -139,8 +141,7 @@ async fn main() -> anyhow::Result<()> {
                 project_info_args.show_info(db_handler).await?;
             }
             ProjectCommands::Ui => {
-                let mut projects = db_handler.get_projects().await?;
-                projects.push(DEFAULT_PROJECT.clone());
+                let projects = db_handler.get_projects().await?;
                 let mut ui = commands::project::project_ui::ProjectUI::new(projects, db_handler);
                 ui.run_ui()?;
             }
@@ -148,6 +149,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run(run) => match &mut run.run_commands {
             // init http requester
             RunCommands::Action(run_action_args) => {
+                println!("Running action {:?}", run_action_args);
                 run_wrapper(run_action_args, None, &db_handler).await;
             }
             RunCommands::TestSuite(test_suite_args) => {

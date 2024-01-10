@@ -71,7 +71,8 @@ impl<'a, T: Db + Send + Sync + 'a> PostmanImporter<'a, T> {
                 };
                 Some(Action {
                     name: Some(current_name.to_string()),
-                    run_action_args: Some(run_action_args),
+                    //run_action_args: Some(run_action_args),
+                    actions: vec![],
                     project_name: Some(project_name.to_string()),
                     ..Default::default()
                 })
