@@ -37,12 +37,8 @@ pub struct CurrentActionData<'a> {
 
 impl CurrentActionData<'_> {
     fn get_verb_and_url(run_action_args: &RunActionArgs) -> (&str, &str) {
-        let verb = run_action_args
-            .verb.as_deref()
-            .unwrap_or("");
-        let url = run_action_args
-            .url.as_deref()
-            .unwrap_or("");
+        let verb = run_action_args.verb.as_deref().unwrap_or("");
+        let url = run_action_args.url.as_deref().unwrap_or("");
         (verb, url)
         // (verb.to_owned(), url.to_owned())
     }
@@ -166,15 +162,15 @@ pub struct RunActionArgs {
 impl RunActionArgs {
     pub async fn save_if_needed(
         &self,
-        db: &Box<dyn Db>,
-        actions: &Vec<DomainAction>,
+        db: &dyn Db,
+        actions: &[DomainAction],
     ) -> anyhow::Result<()> {
         if let Some(action_name) = &self.save {
             let r = db
                 .upsert_action(&Action {
                     id: None,
                     name: Some(action_name.clone()),
-                    actions: actions.clone(),
+                    actions: actions.to_owned(),
                     body_example: None,
                     response_example: None,
                     project_name: None,
@@ -193,8 +189,8 @@ impl RunActionArgs {
     /// Save the action to a test suite if the parameter is present
     async fn save_to_ts_if_needed(
         &self,
-        db: &Box<dyn Db>,
-        actions: &Vec<DomainAction>,
+        db: &dyn Db,
+        actions: &[DomainAction],
     ) -> anyhow::Result<()> {
         // save as requested
         match &self.save_to_ts {
@@ -211,7 +207,7 @@ impl RunActionArgs {
                     .upsert_test_suite_instance(&TestSuiteInstance {
                         id: None,
                         test_suite_name: ts_name.clone(),
-                        actions: actions.clone(),
+                        actions: actions.to_owned(),
                         created_at: None,
                         updated_at: None,
                     })
@@ -334,7 +330,7 @@ impl RunActionArgs {
     pub async fn run_action<'a>(
         &'a mut self,
         http: &'a http::Api,
-        db: &Box<dyn Db>,
+        db: &dyn Db,
         multi: Option<&'a MultiProgress>,
         pb: Option<&'a ProgressBar>,
     ) -> Vec<Vec<bool>> {
@@ -406,9 +402,7 @@ impl RunActionArgs {
                         );
                         vec![merged]
                     } else {
-                        runnable_actions
-                            .iter().cloned()
-                            .collect::<Vec<DomainAction>>()
+                        runnable_actions.to_vec()
                     }
                 }
                 None => {

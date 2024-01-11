@@ -24,7 +24,7 @@ impl TestSuiteArgs {
         &self,
         test: &TestSuiteInstance,
         api: &Api,
-        db: &Box<dyn Db>,
+        db: &dyn Db,
         printer: &mut Printer,
         multi_progress: &MultiProgress,
         pb: &indicatif::ProgressBar,
@@ -47,7 +47,7 @@ impl TestSuiteArgs {
         Ok(true)
     }
 
-    pub async fn run_test_suite(&self, api: &Api, db: &Box<dyn Db>) -> anyhow::Result<()> {
+    pub async fn run_test_suite(&self, api: &Api, db: &dyn Db) -> anyhow::Result<()> {
         let tests = db.get_test_suite_instance(&self.name).await?;
 
         println!("Running test suite {}", self.name.green());

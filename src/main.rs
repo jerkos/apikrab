@@ -60,6 +60,7 @@ lazy_static! {
     });
 }
 
+#[allow(clippy::await_holding_lock)]
 async fn get_db() -> Box<dyn Db + 'static> {
     let config = CONFIG.lock().unwrap();
     match &config.db_engine {
@@ -104,7 +105,7 @@ enum Commands {
 async fn run_wrapper(
     run_action_args: &mut Box<RunActionArgs>,
     v: Option<Verb>,
-    db_handler: &Box<dyn Db>,
+    db_handler: &dyn Db,
 ) {
     let requester = http::Api::new(run_action_args.timeout, run_action_args.insecure);
     if v.is_some() {
@@ -149,25 +150,25 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run(run) => match &mut run.run_commands {
             // init http requester
             RunCommands::Action(run_action_args) => {
-                run_wrapper(run_action_args, None, &db_handler).await;
+                run_wrapper(run_action_args, None, &*db_handler).await;
             }
             RunCommands::TestSuite(test_suite_args) => {
                 let requester = http::Api::new(Some(10), true);
                 test_suite_args
-                    .run_test_suite(&requester, &db_handler)
+                    .run_test_suite(&requester, &*db_handler)
                     .await?;
             }
             RunCommands::Get(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::Get), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Get), &*db_handler).await;
             }
             RunCommands::Post(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::Post), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Post), &*db_handler).await;
             }
             RunCommands::Put(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::Put), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Put), &*db_handler).await;
             }
             RunCommands::Delete(run_action_args) => {
-                run_wrapper(run_action_args, Some(Verb::Delete), &db_handler).await;
+                run_wrapper(run_action_args, Some(Verb::Delete), &*db_handler).await;
             }
         },
         Commands::TestSuite(test_suite) => match &mut test_suite.ts_commands {

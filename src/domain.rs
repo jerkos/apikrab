@@ -112,7 +112,7 @@ impl DomainAction {
         &self,
         computed_url: &str,
         fetch_result: anyhow::Result<&FetchResult, &anyhow::Error>,
-        db: &Box<dyn Db>,
+        db: &dyn Db,
     ) -> anyhow::Result<i64> {
         let f = fetch_result.as_ref();
         db.insert_history(&History {
@@ -137,7 +137,7 @@ impl DomainAction {
         &self,
         fetch_result: anyhow::Result<&FetchResult, &anyhow::Error>,
         action_opt: Option<Action>,
-        db: &Box<dyn Db>,
+        db: &dyn Db,
     ) -> anyhow::Result<()> {
         match fetch_result.ok().zip(action_opt) {
             Some((f @ FetchResult { response, .. }, ref mut action)) => {
@@ -159,7 +159,7 @@ impl DomainAction {
     /// retrieve project from db
     /// return None if anonymous action
     /// return Default project if no project found
-    pub async fn project_from_db(project_name: Option<&str>, db: &Box<dyn Db>) -> Option<Project> {
+    pub async fn project_from_db(project_name: Option<&str>, db: &dyn Db) -> Option<Project> {
         match project_name.as_ref() {
             Some(p_name) => db.get_project(p_name).await.ok(),
             None => db.get_project("default").await.ok(),
@@ -226,11 +226,12 @@ impl DomainAction {
         pyrequest
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_with_tests(
         &self,
         action_opt: Option<&Action>,
         ctx: &mut HashMap<String, String>,
-        db: &Box<dyn Db>,
+        db: &dyn Db,
         http: &Api,
         printer: &mut Printer,
         multi_progress: &MultiProgress,
@@ -270,7 +271,7 @@ impl DomainAction {
     pub async fn run(
         &self,
         action_opt: Option<&Action>,
-        db: &Box<dyn Db>,
+        db: &dyn Db,
         http: &Api,
         multi_progress: &MultiProgress,
     ) -> Vec<(String, anyhow::Result<http::FetchResult>)> {

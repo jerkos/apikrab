@@ -7,7 +7,7 @@ use indicatif::{MultiProgress, ProgressBar};
 use postman_collection::v2_1_0::{self, Url};
 use postman_collection::v2_1_0::{HeaderUnion, Items, RequestUnion};
 
-use super::import::Import;
+use super::import_helper::Import;
 
 fn replace_postman_path(path: &str) -> &str {
     if let Some(stripped) = path.strip_prefix(':') {

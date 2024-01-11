@@ -4,7 +4,7 @@ use crate::db::dto::{Action, Project};
 use async_trait::async_trait;
 use openapiv3::{OpenAPI, Operation};
 
-use super::import::Import;
+use super::import_helper::Import;
 
 pub struct OpenapiV3Importer<'a, T: Db> {
     pub db_handler: &'a T,
