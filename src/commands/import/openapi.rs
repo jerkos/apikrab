@@ -12,7 +12,7 @@ pub struct OpenapiV3Importer<'a, T: Db> {
 
 impl<'a, T: Db> OpenapiV3Importer<'a, T> {
     pub fn get_action(op: &Operation, path: &str, verb: &str, project_name: &str) -> Action {
-        let run_action_args = RunActionArgs {
+        let _run_action_args = RunActionArgs {
             url: Some(path[1..].to_string()),
             verb: Some(verb.to_string()),
             ..Default::default()

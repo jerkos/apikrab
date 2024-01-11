@@ -63,7 +63,7 @@ impl<'a, T: Db + Send + Sync + 'a> PostmanImporter<'a, T> {
     pub fn items_to_action(item: &Items, current_name: &str, project_name: &str) -> Option<Action> {
         match item.request.as_ref()? {
             RequestUnion::RequestClass(r_cls) => {
-                let run_action_args = RunActionArgs {
+                let _run_action_args = RunActionArgs {
                     url: r_cls.url.as_ref().and_then(Self::get_url),
                     verb: r_cls.method.clone(),
                     header: r_cls.header.as_ref().and_then(Self::get_headers),

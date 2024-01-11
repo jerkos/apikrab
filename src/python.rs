@@ -36,6 +36,6 @@ pub(crate) fn run_python_pre_script(
         };
         let request = PyCell::new(py, r)?;
         py_run!(py, request, python_script);
-        Ok(request.extract::<PyRequest>()?)
+        request.extract::<PyRequest>()
     })
 }

@@ -38,15 +38,11 @@ pub struct CurrentActionData<'a> {
 impl CurrentActionData<'_> {
     fn get_verb_and_url(run_action_args: &RunActionArgs) -> (&str, &str) {
         let verb = run_action_args
-            .verb
-            .as_ref()
-            .map(String::as_str)
-            .unwrap_or(&"");
+            .verb.as_deref()
+            .unwrap_or("");
         let url = run_action_args
-            .url
-            .as_ref()
-            .map(String::as_str)
-            .unwrap_or(&"");
+            .url.as_deref()
+            .unwrap_or("");
         (verb, url)
         // (verb.to_owned(), url.to_owned())
     }
@@ -58,7 +54,7 @@ impl CurrentActionData<'_> {
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
         println!("run action args: {:?}", run_action_args);
-        let (verb, url) = Self::get_verb_and_url(&run_action_args);
+        let (verb, url) = Self::get_verb_and_url(run_action_args);
         println!("verb: {}, url: {}", verb, url);
         DomainAction::from_current_action_data(
             self.name,
@@ -324,7 +320,7 @@ impl RunActionArgs {
         )
         .map(|d| CurrentActionData {
             name: d.0,
-            project: self.project.as_ref().map(|p| p.as_str()),
+            project: self.project.as_deref(),
             header: d.1,
             body: d.2,
             xtract_path: d.3,
@@ -411,8 +407,7 @@ impl RunActionArgs {
                         vec![merged]
                     } else {
                         runnable_actions
-                            .iter()
-                            .map(|a| a.clone())
+                            .iter().cloned()
                             .collect::<Vec<DomainAction>>()
                     }
                 }
@@ -423,7 +418,7 @@ impl RunActionArgs {
             };
 
             // keeping track of all computed actions
-            actions.extend(runnable_actions.iter().map(|a| a.clone()));
+            actions.extend(runnable_actions.iter().cloned());
 
             // running each actions
             for runnable_action in runnable_actions.iter() {

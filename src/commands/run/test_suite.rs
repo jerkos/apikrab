@@ -61,7 +61,7 @@ impl TestSuiteArgs {
         for test in tests {
             // create a ctx for each test
             let is_success = self
-                .run_test_suite_instance(&test, api, &db, &mut printer, &multi, &pb)
+                .run_test_suite_instance(&test, api, db, &mut printer, &multi, &pb)
                 .await?;
             pb.inc(1);
             results.push(is_success);

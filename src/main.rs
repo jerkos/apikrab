@@ -149,7 +149,6 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run(run) => match &mut run.run_commands {
             // init http requester
             RunCommands::Action(run_action_args) => {
-                println!("Running action {:?}", run_action_args);
                 run_wrapper(run_action_args, None, &db_handler).await;
             }
             RunCommands::TestSuite(test_suite_args) => {

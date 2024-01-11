@@ -237,7 +237,7 @@ impl DomainAction {
         main_pb: &ProgressBar,
     ) -> Vec<bool> {
         let fetch_results = self
-            .run(action_opt, db, http, &multi_progress)
+            .run(action_opt, db, http, multi_progress)
             .await
             .into_iter()
             .map(|(url, result)| {
@@ -246,7 +246,7 @@ impl DomainAction {
                     fetch_result: result.as_ref(),
                     printer,
                 }
-                .handle_result(self.extract_path.as_ref(), ctx, &main_pb);
+                .handle_result(self.extract_path.as_ref(), ctx, main_pb);
                 // returning result
                 R {
                     url,
@@ -279,7 +279,7 @@ impl DomainAction {
                 let action_cloned = action_opt.cloned();
 
                 let scripted_request = self
-                    .run_hook(&r#""#, computed_url, query_params.as_ref())
+                    .run_hook(r#""#, computed_url, query_params.as_ref())
                     .unwrap();
 
                 // add a progress bar
