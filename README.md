@@ -231,24 +231,6 @@ ak project ui
 ```
 ![Project view](img/project_view.png "Project view")
 
-
-### Run your action:
-Then, action can be ran as usual:
-
-```bash
-ak run action get-todo -p id:1
-```
-```
-Received response:
-{
-  "completed": false,
-  "id": 1,
-  "title": "delectus aut autem",
-  "userId": 1
-}
-...
-```
-
 ### Examples
 Extract data from your response using jsonpath (not fully implemented yet)
 ```bash
