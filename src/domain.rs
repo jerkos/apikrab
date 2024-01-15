@@ -9,7 +9,7 @@ use crate::{
         _http_result::HttpResult,
         _printer::Printer,
         _progress_bar::{add_progress_bar_for_request, finish_progress_bar},
-        _run_helper::{get_body, get_computed_urls, get_xtracted_path},
+        _run_helper::{get_body, get_computed_urls, get_xtracted_path, ANONYMOUS_ACTION},
         _test_checker::TestChecker,
         action::R,
     },
@@ -32,9 +32,14 @@ use itertools::Itertools;
 use pyo3::PyErr;
 use serde::{Deserialize, Serialize};
 
+/// Extract name from optional action
+pub fn get_action_name(action: Option<&Action>) -> &str {
+    let action_name_opt = action.as_ref().and_then(|a| a.name.as_deref());
+    action_name_opt.unwrap_or(ANONYMOUS_ACTION)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct DomainAction {
-    pub(crate) name: String,
     pub(crate) verb: String,
     pub(crate) headers: Option<HashMap<String, String>>,
     pub(crate) urls: HashSet<String>,
@@ -45,11 +50,27 @@ pub struct DomainAction {
 }
 
 impl DomainAction {
+    /// Merge two domain actions into a new one
+    /// basically cloning elements of other if they are not empty
+    /// and if they are empty, cloning elements of self
+    ///
+    /// # Example
+    /// ```rust
+    /// use crate::domain::DomainAction;
+    /// let action1 = DomainAction {
+    ///    verb: "GET".to_string(),
+    ///     ..Default::default()
+    /// };
+    /// let action2 = DomainAction {
+    ///   verb: "POST".to_string(),
+    ///  ..Default::default()
+    /// };
+    /// let merged = action1.merge_with(&action2);
+    ///```
     pub fn merge_with(&self, other: &DomainAction) -> DomainAction {
         // merge two domain actions into a new one
         // the new one will have the same name as the first one
         DomainAction {
-            name: self.name.clone(),
             verb: if !other.verb.is_empty() {
                 other.verb.clone()
             } else {
@@ -61,7 +82,7 @@ impl DomainAction {
             } else {
                 other.urls.clone()
             },
-            query_params: if !other.query_params.is_empty() {
+            query_params: if !other.query_params.is_empty() && other.query_params[0].is_some() {
                 other.query_params.clone()
             } else {
                 self.query_params.clone()
@@ -76,7 +97,18 @@ impl DomainAction {
         }
     }
 
-    /// check if an action can be run
+    /// Check if an action can be run
+    /// an action can be run if it does not contain any interpolation
+    /// in its url, body, headers or query_params
+    /// # Example
+    /// ```rust
+    /// use crate::domain::DomainAction;
+    /// let action = DomainAction {
+    ///   verb: "GET".to_string(),
+    ///   ..Default::default()
+    /// };
+    /// assert!(action.can_be_run());
+    /// ```
     pub fn can_be_run(&self) -> bool {
         let mut can_be_ran = true;
         if let Some(url) = self.urls.iter().next() {
@@ -110,6 +142,7 @@ impl DomainAction {
 
     async fn insert_history_line(
         &self,
+        action_name: &str,
         computed_url: &str,
         fetch_result: anyhow::Result<&FetchResult, &anyhow::Error>,
         db: &dyn Db,
@@ -117,7 +150,7 @@ impl DomainAction {
         let f = fetch_result.as_ref();
         db.insert_history(&History {
             id: None,
-            action_name: self.name.clone(),
+            action_name: action_name.to_string(),
             url: computed_url.to_string(),
             body: self
                 .body
@@ -168,7 +201,6 @@ impl DomainAction {
 
     #[allow(clippy::too_many_arguments)]
     pub fn from_current_action_data(
-        action_name: &str,
         verb: &str,
         run_action_args_url: &str,
         header: &str,
@@ -181,7 +213,6 @@ impl DomainAction {
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
         DomainAction {
-            name: action_name.to_string(),
             verb: verb.to_string(),
             headers: get_str_as_interpolated_map(header, ctx, Interpol::MultiInterpol),
             urls: get_computed_urls(
@@ -205,6 +236,7 @@ impl DomainAction {
         }
     }
 
+    /// run python script if any on the action request
     pub fn run_hook(
         &self,
         python_script: &str,
@@ -263,7 +295,7 @@ impl DomainAction {
                 ctx,
                 expected,
             }
-            .check(&self.name, main_pb);
+            .check(get_action_name(action_opt), main_pb);
         }
         fetch_results.iter().map(|_| true).collect_vec()
     }
@@ -311,10 +343,15 @@ impl DomainAction {
                         .await;
                     // save history line, let it silent if it fails
                     if let Err(e) = self
-                        .insert_history_line(computed_url, fetch_result.as_ref(), db)
+                        .insert_history_line(
+                            get_action_name(action_opt),
+                            computed_url,
+                            fetch_result.as_ref(),
+                            db,
+                        )
                         .await
                     {
-                        pb.println(format!("[ERROR] {}", e));
+                        pb.println(format!("[ERROR] history line insertion failed: {}", e));
                     }
 
                     if action_cloned.is_some() {

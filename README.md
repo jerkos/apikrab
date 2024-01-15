@@ -252,7 +252,7 @@ Received response:
 ### Examples
 Extract data from your response using jsonpath (not fully implemented yet)
 ```bash
-apikrab run action get-todo -p id:1 -e completed
+ak run action get-todo -p id:1 -e completed
 ```
 ```
 Request took: 286.501417ms
@@ -261,15 +261,15 @@ Extraction of completed: false
 ```
 You can also save the result in your clipboard
 ```bash
-apikrab run action get-todo -p id:1 -e completed --clipboard
+ak run action get-todo -p id:1 -e completed --clipboard
 ```
 or ready to be used for grepping
 ```bash
-apikrab run action get-todo -p id:1 -e completed --grep
+ak run action get-todo -p id:1 -e completed --grep
 ```
 You can use the grep option to filter out unwanted data
 ```bash
-apikrab run action get-todo -p id:1 -e $ --grep >> result.json
+ak run action get-todo -p id:1 -e $ --grep >> result.json
 ```
 
 ## History
@@ -292,6 +292,27 @@ provides a way to generate a completion script for your shell.
 ```bash
 ak completion bash > /usr/local/etc/bash_completion.d/apikrab
 ```
+In order to get Project and action completion working, when using json/yaml Db backend, one have
+to in top of his config completion file
+
+```bash
+	ACTIONS=()
+    while read -r line; do
+        filename=$(basename "$line" .json)
+        ACTIONS+=("$filename")
+    done < <(find ~/.config/qapi/projects -type f)
+
+	PROJECTS=()
+	while read -r line; do
+        filename=$(basename "$line")
+        PROJECTS+=("$filename")
+    done < <(find ~/.config/qapi/projects/* -type d)
+```
+
+And report available values in all possible command places !
+
+See contrib folder to see some examples.
+
 Clap also provides completion for zsh, fish, powershell, elvish.
 See the clap crate !
 

@@ -11,11 +11,6 @@ use super::action::RunActionArgs;
 
 pub static ANONYMOUS_ACTION: &str = "UNKNOWN";
 
-/// Check if action is anonymous
-pub fn is_anonymous_action(action_name: &str) -> bool {
-    action_name == ANONYMOUS_ACTION
-}
-
 /// Check arguments, could be probably done with clap
 /// but I'm too lazy to do it
 pub(crate) fn check_input(run_action_args: &RunActionArgs) -> anyhow::Result<()> {

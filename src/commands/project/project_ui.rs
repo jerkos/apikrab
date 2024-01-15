@@ -1,9 +1,9 @@
+use crate::commands::run::_run_helper::ANONYMOUS_ACTION;
 use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
-use crate::utils::{human_readable_date, random_emoji};
-use crate::DEFAULT_PROJECT;
+use crate::utils::human_readable_date;
 use crossterm::event::{self};
 use ratatui::backend::Backend;
 use ratatui::Frame;
@@ -88,11 +88,7 @@ impl<'a> ProjectUI<'a> {
                 .clone();
                 self_cloned
                     .db
-                    .get_actions(if selected_item.name == DEFAULT_PROJECT.name {
-                        None
-                    } else {
-                        Some(&selected_item.name)
-                    })
+                    .get_actions(Some(&selected_item.name))
                     .await
                     .unwrap()
             })
@@ -120,22 +116,48 @@ impl<'a> ProjectUI<'a> {
 
     fn get_color(&self, area: ActiveArea) -> Color {
         if area == self.active_area {
-            Color::Blue
+            Color::Green
         } else {
             Color::DarkGray
         }
     }
     fn build_ui<B: Backend>(&mut self, frame: &mut Frame<B>) -> io::Result<()> {
+        let all = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![
+                Percentage(98),
+                Percentage(2), // examples
+            ])
+            .split(frame.size());
+
+        // render status bar displaying shortcuts
+        let status_bar = Paragraph::new(
+            Line::from(
+
+                vec![
+                    if self.active_area == ActiveArea::ProjectPane {
+                        Span::styled(" → action pane   ↓ next project  ↑ previous project", Style::default().fg(Color::DarkGray))
+                    } else if self.active_area == ActiveArea::ActionPane {
+                        Span::styled(" ← project pane   ↓ next action  ↑ previous action    Ctrl-b body example    Ctrl-r response example    ESC action pane", Style::default().fg(Color::DarkGray))
+                    } else {
+                        Span::styled("", Style::default().fg(Color::DarkGray))
+                    },
+                ]
+            )
+        ).bg(Color::DarkGray).fg(Color::White);
+        frame.render_widget(status_bar, all[1]);
+
         let main_layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(vec![Percentage(30), Percentage(70), Min(0)])
-            .split(frame.size());
+            .split(all[0]);
 
         let project_list = List::new(
             self.projects
                 .items
                 .iter()
-                .map(|p| {
+                .enumerate()
+                .map(|(i, p)| {
                     let mut conf_keys = p
                         .get_project_conf()
                         .unwrap_or(HashMap::new())
@@ -144,12 +166,7 @@ impl<'a> ProjectUI<'a> {
                         .collect::<Vec<_>>();
                     conf_keys.sort();
                     ListItem::new(vec![Line::styled(
-                        format!(
-                            " {} {}({})",
-                            random_emoji(),
-                            p.name.clone(),
-                            conf_keys.join(", ")
-                        ),
+                        format!(" {}. {}({})", i, p.name.clone(), conf_keys.join(", ")),
                         Style::default().fg(Color::LightGreen).bold(),
                     )])
                 })
@@ -162,7 +179,7 @@ impl<'a> ProjectUI<'a> {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(self.get_color(ActiveArea::ProjectPane))),
         )
-        .highlight_style(Style::default().fg(Color::White))
+        .highlight_style(Style::default().fg(Color::Yellow))
         .highlight_symbol(">>");
 
         // rendering
@@ -184,8 +201,9 @@ impl<'a> ProjectUI<'a> {
                     let r = &a.actions[0];
                     let v = &r.verb;
                     let url = r.urls.iter().next().cloned().unwrap_or_default();
+                    let action_name = a.name.as_deref().unwrap_or(ANONYMOUS_ACTION);
                     ListItem::new(vec![
-                        Line::styled(&r.name, Style::default().fg(Color::LightGreen).bold()),
+                        Line::styled(action_name, Style::default().fg(Color::LightGreen).bold()),
                         Line::from(vec![
                             Span::raw("    "),
                             match v.as_str() {
@@ -281,7 +299,7 @@ impl<'a> ProjectUI<'a> {
         }
 
         // getting action body and response example
-        let current_action = &self.actions.items[selected_action_index.unwrap()];
+        let current_action = self.actions.items[selected_action_index.unwrap()].clone();
         let body_example = Self::payload_as_str_pretty(current_action.body_example.as_ref())
             .unwrap_or("FAILED TO PARSE BODY EXAMPLE".to_string());
         let response_example =
@@ -299,7 +317,7 @@ impl<'a> ProjectUI<'a> {
             if let Some(t) = text_area.as_mut() {
                 t.set_block(t.block().unwrap().clone().border_style(Style::default().fg(
                     if area == &self.active_area {
-                        Color::Blue
+                        Color::Green
                     } else {
                         Color::DarkGray
                     },

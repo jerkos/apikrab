@@ -82,7 +82,7 @@ impl Db for JsonHandler {
     /// Insert a new action in the project folder.
     async fn upsert_action(&self, action: &Action) -> anyhow::Result<()> {
         let dirname = match action.project_name.as_ref() {
-            Some(p_name) => format!("{}/{}", self.get_root(), p_name),
+            Some(p_name) => format!("{}/projects/{}", self.get_root(), p_name),
             None => format!("{}/projects/default", self.get_root()),
         };
 
@@ -192,12 +192,27 @@ impl Db for JsonHandler {
     async fn get_project(&self, project_name: &str) -> anyhow::Result<Project> {
         Ok(Project {
             name: project_name.to_string(),
+            // may not exist ?
+            conf: serde_json::from_str(
+                &fs::read_to_string(format!("{}/projects/conf.json", self.get_root()))
+                    .await
+                    .unwrap_or_else(|_| "{}".to_string()),
+            )?,
             ..Default::default()
         })
     }
 
     async fn upsert_project(&self, project: &Project) -> anyhow::Result<i64> {
         fs::create_dir_all(format!("{}/projects/{}", self.get_root(), project.name)).await?;
+
+        // adding conf json
+        let project_conf = format!("{}/projects/conf.json", self.get_root());
+        if let Ok(value) = fs::try_exists(&project_conf).await {
+            if !value {
+                fs::write(project_conf, serde_json::to_string_pretty(&project.conf)?).await?;
+            }
+        }
+
         Ok(0)
     }
 

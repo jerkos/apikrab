@@ -1,4 +1,3 @@
-use crate::commands::project::add_action::AddActionArgs;
 use crate::commands::project::create::CreateProjectArgs;
 use crate::domain::DomainAction;
 use crate::utils::parse_cli_conf_to_map;
@@ -115,27 +114,6 @@ impl FromRow<'_, SqliteRow> for Action {
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
-    }
-}
-
-impl From<&AddActionArgs> for Action {
-    fn from(add_action_args: &AddActionArgs) -> Self {
-        // panicking if both are defined
-        if add_action_args.url_encoded && add_action_args.form_data {
-            panic!("Cannot have both url encoded and form data");
-        }
-
-        Action {
-            // action is none because it's not in db yet
-            id: None,
-            name: Some(add_action_args.name.clone()),
-            actions: vec![],
-            body_example: None,
-            response_example: None,
-            project_name: Some(add_action_args.project_name.clone()),
-            created_at: None,
-            updated_at: None,
-        }
     }
 }
 

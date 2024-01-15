@@ -1,6 +1,5 @@
 use crossterm::style::Stylize;
 use itertools::Itertools;
-use rand::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use strum::{EnumIter, EnumString, IntoEnumIterator};
@@ -235,13 +234,6 @@ pub fn val_or_join<'a>(val: &'a str, opt: Option<&Vec<String>>) -> Cow<'a, str> 
         Some(h) => Cow::Owned(h.iter().filter(|v| !v.is_empty()).join(SEP)),
         None => Cow::Owned("".to_string()),
     }
-}
-
-/// Generate a random emoji from the unicode range
-/// which is then incorporated in a project name
-pub fn random_emoji() -> char {
-    let x: u32 = thread_rng().gen_range(0x1F600..0x1F64F);
-    char::from_u32(x).unwrap_or('💔')
 }
 
 /// Format a query given an action, an url and query params

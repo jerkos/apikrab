@@ -13,7 +13,7 @@ pub struct RmActionArgs {
 }
 
 impl RmActionArgs {
-    pub async fn rm_action(&self, db_handler: Box<dyn Db>) -> anyhow::Result<()> {
+    pub async fn rm_action(&self, db_handler: &dyn Db) -> anyhow::Result<()> {
         db_handler
             .rm_action(&self.name, Some(self.project.as_str()))
             .await?;

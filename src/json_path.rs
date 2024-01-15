@@ -563,17 +563,17 @@ pub fn parse_input_js_path(json_path: &str) -> Vec<(String, Option<JspExp>)> {
     results
 }
 
-pub fn json_path<'a>(json_str: &'a str, search: &'a str) -> Option<Value> {
+pub fn json_path<'a>(json_str: &'a str, search_str: &'a str) -> Option<Value> {
     let dollar = JspToken::Dollar.as_ref();
-    if search == dollar {
+    if search_str == dollar {
         return serde_json::from_str(json_str).ok();
     }
 
     let dollar_plus_dot = format!("{}.", dollar);
-    let search = search.strip_prefix(&dollar_plus_dot);
+    let search = search_str.strip_prefix(&dollar_plus_dot);
 
     if search.is_none() {
-        eprintln!("Invalid search: {}", search.unwrap());
+        eprintln!("Invalid search: {:?}", search_str);
         return None;
     }
 

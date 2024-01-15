@@ -9,18 +9,12 @@ pub struct ProjectInfoArgs {
 }
 
 impl ProjectInfoArgs {
-    pub async fn show_info(&self, db_handler: Box<dyn Db>) -> anyhow::Result<()> {
+    pub async fn show_info(&self, db_handler: &dyn Db) -> anyhow::Result<()> {
         let project = db_handler.get_project(&self.name).await?;
         println!("{}\n", project);
 
         println!("{}", "Actions:".to_string().red().underline());
-        let actions = db_handler
-            .get_actions(if self.name.is_empty() {
-                Some(&self.name)
-            } else {
-                None
-            })
-            .await?;
+        let actions = db_handler.get_actions(Some(&self.name)).await?;
         actions
             .iter()
             .enumerate()

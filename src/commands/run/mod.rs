@@ -27,7 +27,7 @@ pub enum RunCommands {
     /// override verb to PUT
     #[command(alias = "PUT")]
     Put(Box<RunActionArgs>),
-    /// override verb to PUT
+    /// override verb to DELETE
     #[command(alias = "DELETE")]
     Delete(Box<RunActionArgs>),
 

@@ -16,7 +16,7 @@ use std::process::exit;
 use std::time::Duration;
 
 use super::_progress_bar::new_pb;
-use super::_run_helper::is_anonymous_action;
+use super::_run_helper::ANONYMOUS_ACTION;
 
 #[derive(Debug)]
 pub struct R {
@@ -40,7 +40,6 @@ impl CurrentActionData<'_> {
         let verb = run_action_args.verb.as_deref().unwrap_or("");
         let url = run_action_args.url.as_deref().unwrap_or("");
         (verb, url)
-        // (verb.to_owned(), url.to_owned())
     }
 
     pub fn to_domain_action(
@@ -49,11 +48,8 @@ impl CurrentActionData<'_> {
         project: Option<&Project>,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
-        println!("run action args: {:?}", run_action_args);
         let (verb, url) = Self::get_verb_and_url(run_action_args);
-        println!("verb: {}, url: {}", verb, url);
         DomainAction::from_current_action_data(
-            self.name,
             verb,
             url,
             val_or_join(self.header, run_action_args.header.as_ref()).as_ref(),
@@ -70,6 +66,52 @@ impl CurrentActionData<'_> {
             ctx,
         )
     }
+}
+
+/// Asynchronously retrieves an `Action` and a `Project` based on the provided current action data.
+///
+/// This function attempts to retrieve an `Action` from the database using the name and project
+/// from the current action data. If the retrieval is successful, it returns `Some(Action)`. If
+/// there is an error during the retrieval, it returns `None`.
+///
+/// It also attempts to retrieve a `Project` if `current_action_data.project` is `Some`. If it is,
+/// it retrieves the `Project` from the database using `DomainAction::project_from_db` and returns
+/// it. If `current_action_data.project` is `None`, it returns `None`.
+///
+/// # Arguments
+///
+/// * `db` - A dynamic reference to a `Db` trait object that provides database functionality.
+/// * `current_action_data` - A reference to the current action data.
+///
+/// # Returns
+///
+/// * `(Option<Action>, Option<Project>)` - A tuple containing an `Option` that may contain an
+///   `Action` and an `Option` that may contain a `Project`.
+///
+/// # Example
+///
+/// ```no_run
+/// # async fn run() -> (Option<Action>, Option<Project>) {
+/// # let db: &dyn Db = &Database::new();
+/// # let current_action_data = CurrentActionData::new();
+/// let (action, project) = get_action_and_project(db, &current_action_data).await;
+/// # (action, project)
+/// # }
+/// ```
+async fn get_action_and_project(
+    db: &dyn Db,
+    current_action_data: &CurrentActionData<'_>,
+) -> (Option<Action>, Option<Project>) {
+    (
+        db.get_action(current_action_data.name, current_action_data.project)
+            .await
+            .ok(),
+        if current_action_data.project.is_none() {
+            None
+        } else {
+            DomainAction::project_from_db(current_action_data.project, db).await
+        },
+    )
 }
 
 #[derive(Args, Serialize, Deserialize, Debug, Clone, Default)]
@@ -160,6 +202,41 @@ pub struct RunActionArgs {
 }
 
 impl RunActionArgs {
+    /// Asynchronously saves the provided actions to an `Action` if `self.save` is `Some`.
+    ///
+    /// This function checks if `self.save` is `Some`. If it is, it creates a new `Action` with the
+    /// name from `self.save` and the provided actions, and upserts it into the database. The `Action`
+    /// is created with `None` for `id`, `body_example`, `response_example`, and `project_name`, and
+    /// the current UTC time for `created_at` and `updated_at`.
+    ///
+    /// If `self.save` is `None`, the function does nothing and returns `Ok(())`.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - A dynamic reference to a `Db` trait object that provides database functionality.
+    /// * `actions` - A slice of `DomainAction` objects to be saved to the `Action`.
+    ///
+    /// # Returns
+    ///
+    /// * `anyhow::Result<()>` - Returns `Ok(())` if the operation is successful. If there is an error
+    ///   during the operation, it returns `Err(e)`, where `e` is the error.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if there is a problem upserting the `Action` into the
+    /// database.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn run() -> anyhow::Result<()> {
+    /// # let db: &dyn Db = &Database::new();
+    /// # let actions: &[DomainAction] = &[];
+    /// # let obj = Object::new();
+    /// obj.save_if_needed(db, actions).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn save_if_needed(
         &self,
         db: &dyn Db,
@@ -173,7 +250,7 @@ impl RunActionArgs {
                     actions: actions.to_owned(),
                     body_example: None,
                     response_example: None,
-                    project_name: None,
+                    project_name: self.project.clone(),
                     created_at: Some(chrono::Utc::now().naive_utc()),
                     updated_at: Some(chrono::Utc::now().naive_utc()),
                 })
@@ -186,7 +263,40 @@ impl RunActionArgs {
         };
         Ok(())
     }
-    /// Save the action to a test suite if the parameter is present
+
+    /// Asynchronously saves the provided actions to a test suite if needed.
+    ///
+    /// This function checks if `self.save_to_ts` is `Some`. If it is, it creates a new `TestSuite`
+    /// with the name from `self.save_to_ts` and upserts it into the database. It then creates a new
+    /// `TestSuiteInstance` with the provided actions and upserts it into the database as well.
+    ///
+    /// If `self.save_to_ts` is `None`, the function does nothing and returns `Ok(())`.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - A dynamic reference to a `Db` trait object that provides database functionality.
+    /// * `actions` - A slice of `DomainAction` objects to be saved to the test suite.
+    ///
+    /// # Returns
+    ///
+    /// * `anyhow::Result<()>` - Returns `Ok(())` if the operation is successful. If there is an error
+    ///   during the operation, it returns `Err(e)`, where `e` is the error.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if there is a problem upserting the `TestSuite` or
+    /// `TestSuiteInstance` into the database.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn run() -> anyhow::Result<()> {
+    /// # let db: &dyn Db = &Database::new();
+    /// # let actions: &[DomainAction] = &[];
+    /// # let obj = Object::new();
+    /// obj.save_to_ts_if_needed(db, actions).await?;
+    /// # Ok(())
+    /// # }
     async fn save_to_ts_if_needed(
         &self,
         db: &dyn Db,
@@ -286,7 +396,7 @@ impl RunActionArgs {
             self.name
                 .as_ref()
                 .map(|n| n.to_string())
-                .unwrap_or("UNKNOWN".to_string()),
+                .unwrap_or(ANONYMOUS_ACTION.to_string()),
         );
 
         // check for chain action we do have same length for parameters
@@ -304,6 +414,10 @@ impl RunActionArgs {
         Ok(())
     }
 
+    /// Get all action data
+    /// If the action is chained, we need to get all data
+    /// for each action, otherwise we just need to get the data
+    /// for the current action
     pub fn get_action_data(&self) -> Vec<CurrentActionData> {
         // check if action is chained
         itertools::izip!(
@@ -326,21 +440,80 @@ impl RunActionArgs {
         .collect_vec()
     }
 
-    /// Main function for running an action
+    /// Returns a vector of `DomainAction` objects based on the provided parameters.
+    ///
+    /// This function checks if `runnable_actions_from_db` is `Some`. If it is, and if it contains
+    /// exactly one action, it merges this action with the current action data and returns a vector
+    /// containing the merged action. If `runnable_actions_from_db` contains more than one action,
+    /// it returns them as a vector.
+    ///
+    /// If `runnable_actions_from_db` is `None`, it creates a new action from the current action data
+    /// and returns it in a vector.
+    ///
+    /// # Arguments
+    ///
+    /// * `runnable_actions_from_db` - An `Option` that contains a reference to a vector of
+    ///   `DomainAction` objects, or `None`.
+    /// * `current_action_data` - The current action data.
+    /// * `project` - An `Option` that contains a `Project` object, or `None`.
+    /// * `ctx` - A reference to a `HashMap` that maps `String` keys to `String` values.
+    ///
+    /// # Returns
+    ///
+    /// * `Vec<DomainAction>` - A vector of `DomainAction` objects.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # let runnable_actions_from_db: Option<&Vec<DomainAction>> = None;
+    /// # let current_action_data = CurrentActionData::new();
+    /// # let project: Option<Project> = None;
+    /// # let ctx: &HashMap<String, String> = &HashMap::new();
+    /// # let obj = Object::new();
+    /// let actions = obj.get_runnable_actions(runnable_actions_from_db, current_action_data, project, ctx);
+    /// ```
+    fn get_runnable_actions(
+        &self,
+        runnable_actions_from_db: Option<&Vec<DomainAction>>,
+        current_action_data: CurrentActionData<'_>,
+        project: Option<Project>,
+        ctx: &HashMap<String, String>,
+    ) -> Vec<DomainAction> {
+        match &runnable_actions_from_db {
+            Some(runnable_actions) => {
+                // need to merge with current action if runnable action has length one
+                if runnable_actions.len() == 1 {
+                    let merged = runnable_actions[0].merge_with(
+                        &current_action_data.to_domain_action(self, project.as_ref(), ctx),
+                    );
+                    vec![merged]
+                } else {
+                    runnable_actions.to_vec()
+                }
+            }
+            None => {
+                // got an anonymous action so we need to create a new one
+                vec![current_action_data.to_domain_action(self, project.as_ref(), ctx)]
+            }
+        }
+    }
+
+    /// Run the action
+    /// If the action is chained, we need to run each action
+    /// and return the result of each action
     pub async fn run_action<'a>(
         &'a mut self,
         http: &'a http::Api,
         db: &dyn Db,
         multi: Option<&'a MultiProgress>,
         pb: Option<&'a ProgressBar>,
-    ) -> Vec<Vec<bool>> {
+    ) -> anyhow::Result<Vec<Vec<bool>>> {
         // check input and return an error if needed
         if let Err(msg) = check_input(self) {
             eprintln!("{}", msg);
             exit(1);
         }
 
-        println!("Running action: {:?}", self);
         // creating a new context hashmap for storing extracted values
         let mut ctx: HashMap<String, String> = match db.get_conf().await {
             Ok(ctx) => ctx.get_value(),
@@ -362,24 +535,18 @@ impl RunActionArgs {
         });
 
         // prepare the data
-        let _ = self.prepare();
+        self.prepare()?;
 
+        // vector to gather all actions
         let mut actions = vec![];
+
+        // vector to gather all function results
         let mut final_results = vec![];
 
         // iterating possible action if it is a chained action
         for current_action_data in self.get_action_data().into_iter() {
             // retrieve action from db if needed
-            let (action, project) = (
-                db.get_action(current_action_data.name, current_action_data.project)
-                    .await
-                    .ok(),
-                if is_anonymous_action(current_action_data.name) {
-                    None
-                } else {
-                    DomainAction::project_from_db(current_action_data.project, db).await
-                },
-            );
+            let (action, project) = get_action_and_project(db, &current_action_data).await;
 
             // extend configuration if necessary
             ctx.extend(
@@ -393,23 +560,12 @@ impl RunActionArgs {
             let runnable_actions_from_db = action.as_ref().map(|a| &a.actions);
 
             // merge if needed with current action
-            let runnable_actions = match &runnable_actions_from_db {
-                Some(runnable_actions) => {
-                    // need to merge with current action if runnable action has length one
-                    if runnable_actions.len() == 1 {
-                        let merged = runnable_actions[0].merge_with(
-                            &current_action_data.to_domain_action(self, project.as_ref(), &ctx),
-                        );
-                        vec![merged]
-                    } else {
-                        runnable_actions.to_vec()
-                    }
-                }
-                None => {
-                    // got an anonymous action so we need to create a new one
-                    vec![current_action_data.to_domain_action(self, project.as_ref(), &ctx)]
-                }
-            };
+            let runnable_actions = self.get_runnable_actions(
+                runnable_actions_from_db,
+                current_action_data,
+                project,
+                &ctx,
+            );
 
             // keeping track of all computed actions
             actions.extend(runnable_actions.iter().cloned());
@@ -452,10 +608,12 @@ impl RunActionArgs {
 
         // finishing progress bar
         main_pb.finish();
-        println!("{:?}", actions);
-        let _ = self.save_if_needed(db, &actions).await;
-        let _ = self.save_to_ts_if_needed(db, &actions).await;
 
-        final_results
+        // post result actions
+        self.save_if_needed(db, &actions).await?;
+        self.save_to_ts_if_needed(db, &actions).await?;
+
+        // returning results
+        Ok(final_results)
     }
 }

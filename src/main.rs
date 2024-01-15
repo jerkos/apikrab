@@ -27,7 +27,6 @@ use sqlx::{Column, Executor, Row};
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
-use crate::db::dto::Project as DtoProject;
 use crate::ui::run_ui::UIRunner;
 
 #[derive(Debug, Clone, Default)]
@@ -45,14 +44,6 @@ pub struct Config {
 
 lazy_static! {
     pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
-    pub static ref DEFAULT_PROJECT: DtoProject = DtoProject {
-        id: None,
-        name: "DEFAULT".to_string(),
-        main_url: "".to_string(),
-        conf: None,
-        created_at: None,
-        updated_at: None
-    };
     pub static ref DEFAULT_DB_PATH: String = format!("{}/.config/qapi", HOME_DIR.to_str().unwrap());
     pub static ref CONFIG: Mutex<Config> = Mutex::new(Config {
         db_engine: DBEngine::Fs,
@@ -127,19 +118,16 @@ async fn main() -> anyhow::Result<()> {
     match &mut cli.commands {
         Commands::Project(project) => match &mut project.project_commands {
             ProjectCommands::New(create_project_args) => {
-                create_project_args.create(db_handler).await?;
+                create_project_args.create(&*db_handler).await?;
             }
             ProjectCommands::RmAction(rm_action_args) => {
-                rm_action_args.rm_action(db_handler).await?;
-            }
-            ProjectCommands::AddAction(add_action_args) => {
-                add_action_args.add_action(db_handler).await?;
+                rm_action_args.rm_action(&*db_handler).await?;
             }
             ProjectCommands::List(list_projects) => {
-                list_projects.list_projects(db_handler).await?;
+                list_projects.list_projects(&*db_handler).await?;
             }
             ProjectCommands::Info(project_info_args) => {
-                project_info_args.show_info(db_handler).await?;
+                project_info_args.show_info(&*db_handler).await?;
             }
             ProjectCommands::Ui => {
                 let projects = db_handler.get_projects().await?;

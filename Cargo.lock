@@ -139,7 +139,6 @@ dependencies = [
  "openapiv3",
  "postman_collection",
  "pyo3",
- "rand",
  "ratatui",
  "regex",
  "reqwest",

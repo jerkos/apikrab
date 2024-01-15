@@ -17,6 +17,10 @@ pub struct TestSuiteArgs {
     /// Debug output
     #[arg(short, long)]
     debug: bool,
+
+    /// concurrency value
+    #[arg(short, long, default_value = "1")]
+    concurrency: usize,
 }
 
 impl TestSuiteArgs {
@@ -34,12 +38,12 @@ impl TestSuiteArgs {
             let r = action
                 .run_with_tests(None, &mut ctx, db, api, printer, multi_progress, pb)
                 .await;
-            // disable all saving !
+
             if !r.iter().all(|b| *b) {
                 println!(
-                    "Test suite {} failed on action {}",
+                    "Test suite {} failed on action url: {:?}",
                     self.name.red(),
-                    action.name.red()
+                    action.urls
                 );
                 return Ok(false);
             }

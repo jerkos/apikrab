@@ -50,7 +50,7 @@ impl CreateProjectArgs {
         None
     }
     */
-    pub async fn create(&self, db_handler: Box<dyn Db>) -> anyhow::Result<()> {
+    pub async fn create(&self, db_handler: &dyn Db) -> anyhow::Result<()> {
         /*
         match self.get_importer(db_handler) {
             Some((importer, path)) => {
