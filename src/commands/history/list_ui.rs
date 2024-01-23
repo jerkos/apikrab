@@ -63,19 +63,21 @@ impl HistoryUI {
 
             Row::new(item.to_cells()).bottom_margin(1)
         });
-        let t = Table::new(rows, vec![Constraint::Percentage(15),
-                Constraint::Percentage(15),])
-            .header(header)
-            .block(Block::default().borders(Borders::ALL).title("History"))
-            .highlight_style(selected_style)
-            //.highlight_symbol(">> ")
-            .widths(&[
-                Constraint::Percentage(15),
-                Constraint::Percentage(15),
-                Constraint::Percentage(30),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-            ]);
+        let t = Table::new(
+            rows,
+            vec![Constraint::Percentage(15), Constraint::Percentage(15)],
+        )
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title("History"))
+        .highlight_style(selected_style)
+        //.highlight_symbol(">> ")
+        .widths(&[
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(30),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+        ]);
         t
     }
 }

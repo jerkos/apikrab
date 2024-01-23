@@ -1,9 +1,17 @@
-use std::{io, cmp};
+use std::{cmp, io};
 
-use ratatui::{backend::Backend, layout::Rect, style::Color, widgets::{ListState, Widget, Paragraph}, Frame, text::{Text, Line}, buffer::Buffer};
-use serde_json::Value;
-use syntect::{parsing::SyntaxSet, highlighting::ThemeSet, easy::HighlightLines};
 use super::{app::ActiveArea, syntect_tui::into_span};
+use ratatui::{
+    backend::Backend,
+    buffer::Buffer,
+    layout::Rect,
+    style::Color,
+    text::{Line, Text},
+    widgets::{ListState, Paragraph, Widget},
+    Frame,
+};
+use serde_json::Value;
+use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
 pub trait Component {
     fn render<B: Backend>(

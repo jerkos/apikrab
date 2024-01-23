@@ -1,10 +1,16 @@
-use std::{sync::atomic::{AtomicU64, Ordering}, cmp};
+use std::{
+    cmp,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use itertools::Itertools;
-use ratatui::{prelude::*, widgets::{Widget, Paragraph}};
-use syntect::{parsing::SyntaxSet, highlighting::ThemeSet, easy::HighlightLines};
+use ratatui::{
+    prelude::*,
+    widgets::{Paragraph, Widget},
+};
+use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
-use super::{syntect_tui::into_span, components::action_text_areas::TextArea};
+use super::{components::action_text_areas::TextArea, syntect_tui::into_span};
 
 pub fn spaces(size: u8) -> &'static str {
     const SPACES: &str = "                                                                                                                                                                                                                                                                ";
@@ -76,7 +82,7 @@ impl Viewport {
     }
 }
 
-pub struct Renderer<'a>{
+pub struct Renderer<'a> {
     pub(crate) text_area: &'a TextArea<'a>,
     pub(crate) viewport: &'a Viewport,
 }
@@ -97,21 +103,41 @@ impl<'a> Renderer<'a> {
         for line in &self.text_area.get_text_area().lines()[top_row..bottom_row] {
             // not cursor line
             if i != self.text_area.get_text_area().cursor().0 as usize {
-                let mut spans = h.highlight_line(line, &ps)
-                .unwrap().into_iter()
-                .filter_map(|segment| into_span(segment).ok())
-                .collect::<Vec<_>>();
-                let pad = spaces(lnum_len -  num_digits(i + 1) + 1);
-                spans.insert(0, Span::styled(format!("{}{} ", pad, i + 1), self.text_area.get_text_area().line_number_style().unwrap_or_else(|| Style::default())));
+                let mut spans = h
+                    .highlight_line(line, &ps)
+                    .unwrap()
+                    .into_iter()
+                    .filter_map(|segment| into_span(segment).ok())
+                    .collect::<Vec<_>>();
+                let pad = spaces(lnum_len - num_digits(i + 1) + 1);
+                spans.insert(
+                    0,
+                    Span::styled(
+                        format!("{}{} ", pad, i + 1),
+                        self.text_area
+                            .get_text_area()
+                            .line_number_style()
+                            .unwrap_or_else(|| Style::default()),
+                    ),
+                );
                 lines.push(Line::from(spans));
                 i += 1;
                 continue;
             }
             // cursor line
             let mut spans = vec![];
-             // Add line number
-            let pad = spaces(lnum_len -  num_digits(i + 1) + 1);
-            spans.insert(0, Span::styled(format!("{}{} ", pad, i + 1), self.text_area.get_text_area().line_number_style().unwrap_or_else(|| Style::default())));
+            // Add line number
+            let pad = spaces(lnum_len - num_digits(i + 1) + 1);
+            spans.insert(
+                0,
+                Span::styled(
+                    format!("{}{} ", pad, i + 1),
+                    self.text_area
+                        .get_text_area()
+                        .line_number_style()
+                        .unwrap_or_else(|| Style::default()),
+                ),
+            );
             let mut char_count = 0;
             let mut cursor_set = false;
             for (style, v) in h.highlight_line(line, &ps).unwrap().into_iter() {
@@ -121,27 +147,36 @@ impl<'a> Renderer<'a> {
                 let current_char_count = char_count.clone();
                 char_count += v.chars().count();
                 // do not need to split the current span
-                if char_count < self.text_area.get_text_area().cursor().1  || cursor_set {
+                if char_count < self.text_area.get_text_area().cursor().1 || cursor_set {
                     spans.push(into_span((style, v)).unwrap());
                     continue;
-                 } else {
+                } else {
                     //println!("cursor: {},  current_char_count: {}", cursor.1, current_char_count);
 
-                    let cursor_pos = if current_char_count <= self.text_area.get_text_area().cursor().1 {
-                        self.text_area.get_text_area().cursor().1 - current_char_count
-                    } else {
-                        0
-                    };
-                    spans.push(into_span((style, v.get(0..cursor_pos).unwrap_or_else(|| &v))).unwrap());
+                    let cursor_pos =
+                        if current_char_count <= self.text_area.get_text_area().cursor().1 {
+                            self.text_area.get_text_area().cursor().1 - current_char_count
+                        } else {
+                            0
+                        };
+                    spans.push(
+                        into_span((style, v.get(0..cursor_pos).unwrap_or_else(|| &v))).unwrap(),
+                    );
                     if cursor_pos < v.len() {
-                        spans.push(Span::styled(v.get(cursor_pos..cursor_pos + 1).unwrap_or_else(|| &v), Style::default().add_modifier(Modifier::REVERSED)));
+                        spans.push(Span::styled(
+                            v.get(cursor_pos..cursor_pos + 1).unwrap_or_else(|| &v),
+                            Style::default().add_modifier(Modifier::REVERSED),
+                        ));
                         spans.push(into_span((style, &v[cursor_pos + 1..])).unwrap());
                         cursor_set = true;
                     }
                 }
             }
             if !cursor_set {
-                spans.push(Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)));
+                spans.push(Span::styled(
+                    " ",
+                    Style::default().add_modifier(Modifier::REVERSED),
+                ));
             }
             lines.push(Line::from(spans));
             i += 1;
@@ -180,9 +215,7 @@ impl<'a> Widget for Renderer<'a> {
         // To get fine control over the text color and the surrrounding block they have to be rendered separately
         // see https://github.com/ratatui-org/ratatui/issues/144
         let mut text_area = area;
-        let mut inner = Paragraph::new(text)
-            .style(style)
-            .alignment(ta.alignment());
+        let mut inner = Paragraph::new(text).style(style).alignment(ta.alignment());
         if let Some(b) = ta.block() {
             text_area = b.inner(area);
             b.clone().render(area, buf)

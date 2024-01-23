@@ -1,32 +1,39 @@
-
-use colored::Colorize;
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    widgets::{Block, Borders, Paragraph}, text::{Line, Span, Text}, buffer::Buffer,
-};
-use syntect::{parsing::SyntaxSet, highlighting::{ThemeSet, Color as SynColor}, util::{LinesWithEndings, as_24_bit_terminal_escaped}, easy::HighlightLines};
-use std::fmt::Write;
 use crate::{
     db::dto::Action,
     ui::{
         app::ActiveArea,
-        helpers::{highlight_if_needed, payload_as_str_pretty, Component}, syntect_tui::into_span, custom_renderer::{Viewport, Renderer},
+        custom_renderer::{Renderer, Viewport},
+        helpers::{highlight_if_needed, payload_as_str_pretty, Component},
+        syntect_tui::into_span,
     },
 };
-
+use colored::Colorize;
+use ratatui::{
+    buffer::Buffer,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Style},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Paragraph},
+};
+use std::fmt::Write;
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Color as SynColor, ThemeSet},
+    parsing::SyntaxSet,
+    util::{as_24_bit_terminal_escaped, LinesWithEndings},
+};
 
 #[derive(Clone)]
 pub struct TextArea<'a> {
     pub(crate) text_area: tui_textarea::TextArea<'a>,
-    pub(crate) viewport: Viewport
+    pub(crate) viewport: Viewport,
 }
 
 impl<'a> TextArea<'a> {
     pub fn new(tui_text_area: tui_textarea::TextArea<'a>) -> Self {
         Self {
             text_area: tui_text_area,
-            viewport: Viewport::default()
+            viewport: Viewport::default(),
         }
     }
 
@@ -103,7 +110,6 @@ impl<'a> ActionTextAreas<'a> {
         }
     }
 
-
     pub fn render<B: ratatui::prelude::Backend>(
         &mut self,
         frame: &mut ratatui::prelude::Frame,
@@ -136,23 +142,21 @@ impl<'a> ActionTextAreas<'a> {
             highlight_if_needed(current_active_area, self.displayer.get_left_active_area()),
         )));
 
-       let left_renderer = Renderer {
+        let left_renderer = Renderer {
             text_area: &self.left_text_area,
-            viewport: &self.l_viewport
+            viewport: &self.l_viewport,
         };
 
         let right_renderer = Renderer {
             text_area: &self.right_text_area,
-            viewport: &self.r_viewport
+            viewport: &self.r_viewport,
         };
-
 
         frame.render_widget(left_renderer, chunks[0]);
         frame.render_widget(right_renderer, chunks[1]);
         Ok(())
     }
 }
-
 
 pub struct Examples {}
 

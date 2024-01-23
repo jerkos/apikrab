@@ -216,8 +216,7 @@ impl UIRunner for App<'_> {
                 key: Key::Left,
                 ctrl: false,
                 alt: false,
-                                shift: false,
-
+                shift: false,
             } => match &mut self.active_area {
                 ActiveArea::ActionPane => {
                     self.active_area = ActiveArea::ProjectPane;
@@ -250,8 +249,7 @@ impl UIRunner for App<'_> {
                 key: Key::Up,
                 ctrl: false,
                 alt: false,
-                                shift: false,
-
+                shift: false,
             } => match &mut self.active_area {
                 ActiveArea::ProjectPane => {
                     self.projects.previous();
@@ -289,8 +287,7 @@ impl UIRunner for App<'_> {
                 key: Key::Down,
                 ctrl: false,
                 alt: false,
-                                shift: false,
-
+                shift: false,
             } => match self.active_area {
                 ActiveArea::ProjectPane => {
                     self.projects.next();
@@ -377,8 +374,7 @@ impl UIRunner for App<'_> {
                         key: Key::Char('q'),
                         ctrl: false,
                         alt: false,
-                                        shift: false,
-
+                        shift: false,
                     } => return Ok(true),
                     _ => {}
                 },
