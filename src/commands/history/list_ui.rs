@@ -63,7 +63,8 @@ impl HistoryUI {
 
             Row::new(item.to_cells()).bottom_margin(1)
         });
-        let t = Table::new(rows)
+        let t = Table::new(rows, vec![Constraint::Percentage(15),
+                Constraint::Percentage(15),])
             .header(header)
             .block(Block::default().borders(Borders::ALL).title("History"))
             .highlight_style(selected_style)
@@ -104,7 +105,7 @@ impl UIRunner for HistoryUI {
         Ok(false)
     }
 
-    fn ui<B: Backend>(&mut self, f: &mut Frame<B>) {
+    fn ui<B: Backend>(&mut self, f: &mut Frame) {
         let t = self.build_ui();
         let rects = Layout::default()
             .constraints([Constraint::Percentage(100)].as_ref())

@@ -1,4 +1,18 @@
-use ratatui::widgets::ListState;
+use std::{io, cmp};
+
+use ratatui::{backend::Backend, layout::Rect, style::Color, widgets::{ListState, Widget, Paragraph}, Frame, text::{Text, Line}, buffer::Buffer};
+use serde_json::Value;
+use syntect::{parsing::SyntaxSet, highlighting::ThemeSet, easy::HighlightLines};
+use super::{app::ActiveArea, syntect_tui::into_span};
+
+pub trait Component {
+    fn render<B: Backend>(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        current_active_area: ActiveArea,
+    ) -> io::Result<()>;
+}
 
 pub trait Selectable {
     fn selected(&self) -> Option<usize>;
@@ -77,4 +91,24 @@ impl<T> StatefulList<T> {
             items,
         }
     }
+}
+
+pub fn highlight_if_needed(
+    current_active_area: ActiveArea,
+    target_active_area: ActiveArea,
+) -> Color {
+    if current_active_area == target_active_area {
+        Color::Green
+    } else {
+        Color::DarkGray
+    }
+}
+
+pub fn payload_as_str_pretty(payload: Option<&Value>) -> anyhow::Result<String> {
+    let r = serde_json::to_string_pretty(
+        &payload
+            .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+            .unwrap_or(serde_json::Value::Null),
+    )?;
+    Ok(r)
 }

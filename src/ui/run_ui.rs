@@ -57,7 +57,7 @@ pub trait UIRunner {
     fn init(&mut self) {}
 
     // render method for the UI
-    fn ui<B: Backend>(&mut self, f: &mut Frame<B>);
+    fn ui<B: Backend>(&mut self, f: &mut Frame);
 
     // main entry point to enter in ui mode
     fn run_ui(&mut self) -> anyhow::Result<()> {
@@ -94,7 +94,7 @@ pub trait UIRunner {
         self.init();
 
         loop {
-            terminal.draw(|f| self.ui(f))?;
+            terminal.draw(|f| self.ui::<B>(f))?;
 
             let should_quit = self.handle_event()?;
             if should_quit {

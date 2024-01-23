@@ -87,6 +87,9 @@ enum Commands {
     /// List all history call
     #[command(alias = "h")]
     History(History),
+    /// Ui
+    #[command(alias = "u")]
+    Ui,
     /// Print the completion script in stdout
     PrintCompleteScript { shell: Shell },
     /// Exec sql command (for debug purpose)
@@ -129,11 +132,6 @@ async fn main() -> anyhow::Result<()> {
             ProjectCommands::Info(project_info_args) => {
                 project_info_args.show_info(&*db_handler).await?;
             }
-            ProjectCommands::Ui => {
-                let projects = db_handler.get_projects().await?;
-                let mut ui = commands::project::project_ui::ProjectUI::new(projects, db_handler);
-                ui.run_ui()?;
-            }
         },
         Commands::Run(run) => match &mut run.run_commands {
             // init http requester
@@ -174,6 +172,11 @@ async fn main() -> anyhow::Result<()> {
                 list_args.list_history(db_handler).await?;
             }
         },
+        Commands::Ui => {
+            let projects = db_handler.get_projects().await?;
+            let mut ui = ui::app::App::new(projects, db_handler);
+            ui.run_ui()?;
+        }
         &mut Commands::PrintCompleteScript { shell } => {
             generate(
                 shell,
