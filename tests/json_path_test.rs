@@ -243,10 +243,10 @@ fn test_machines_join() {
         .split_terminator("',")
         .filter(|v| !v.is_empty())
         .map(|v| {
-            if v.trim().ends_with("'") {
+            if v.trim().ends_with('\'') {
                 return ", ";
             }
-            v.trim().trim_start_matches("'")
+            v.trim().trim_start_matches('\'')
         })
         .collect();
     assert_eq!(v, [", "]);
