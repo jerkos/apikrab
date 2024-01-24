@@ -1,4 +1,3 @@
-use crate::commands::run::_run_helper::ANONYMOUS_ACTION;
 use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
 use crate::ui::components::action_text_areas::DomainActions;
@@ -153,14 +152,14 @@ impl<'a> App<'a> {
                 self.action_text_areas.action = Some(action.clone());
                 self.action_text_areas.clear_text_areas = true;
                 self.action_text_areas
-                    .render::<B>(frame, right_layout[1], self.active_area)?;
+                    .render(frame, right_layout[1], self.active_area)?;
                 self.action_has_changed = false;
 
                 self.run_action_pane.text_areas.clear_text_areas = true;
                 self.run_action_pane.text_areas.action = self.current_action.clone();
             } else {
                 self.action_text_areas
-                    .render::<B>(frame, right_layout[1], self.active_area)?;
+                    .render(frame, right_layout[1], self.active_area)?;
             }
         }
 

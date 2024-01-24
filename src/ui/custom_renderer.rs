@@ -3,7 +3,6 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use itertools::Itertools;
 use ratatui::{
     prelude::*,
     widgets::{Paragraph, Widget},
@@ -37,48 +36,11 @@ impl Viewport {
         ((u >> 16) as u16, u as u16)
     }
 
-    pub fn rect(&self) -> (u16, u16, u16, u16) {
-        let u = self.0.load(Ordering::Relaxed);
-        let width = (u >> 48) as u16;
-        let height = (u >> 32) as u16;
-        let row = (u >> 16) as u16;
-        let col = u as u16;
-        (row, col, width, height)
-    }
-
-    pub fn position(&self) -> (u16, u16, u16, u16) {
-        let (row_top, col_top, width, height) = self.rect();
-        let row_bottom = row_top.saturating_add(height).saturating_sub(1);
-        let col_bottom = col_top.saturating_add(width).saturating_sub(1);
-
-        (
-            row_top,
-            col_top,
-            cmp::max(row_top, row_bottom),
-            cmp::max(col_top, col_bottom),
-        )
-    }
-
     fn store(&self, row: u16, col: u16, width: u16, height: u16) {
         // Pack four u16 values into one u64 value
         let u =
             ((width as u64) << 48) | ((height as u64) << 32) | ((row as u64) << 16) | col as u64;
         self.0.store(u, Ordering::Relaxed);
-    }
-
-    pub fn scroll(&mut self, rows: i16, cols: i16) {
-        fn apply_scroll(pos: u16, delta: i16) -> u16 {
-            if delta >= 0 {
-                pos.saturating_add(delta as u16)
-            } else {
-                pos.saturating_sub(-delta as u16)
-            }
-        }
-
-        let u = self.0.get_mut();
-        let row = apply_scroll((*u >> 16) as u16, rows);
-        let col = apply_scroll(*u as u16, cols);
-        *u = (*u & 0xffff_ffff_0000_0000) | ((row as u64) << 16) | (col as u64);
     }
 }
 
@@ -102,7 +64,7 @@ impl<'a> Renderer<'a> {
         let mut i = top_row;
         for line in &self.text_area.get_text_area().lines()[top_row..bottom_row] {
             // not cursor line
-            if i != self.text_area.get_text_area().cursor().0 as usize {
+            if i != self.text_area.get_text_area().cursor().0 {
                 let mut spans = h
                     .highlight_line(line, &ps)
                     .unwrap()
@@ -117,7 +79,7 @@ impl<'a> Renderer<'a> {
                         self.text_area
                             .get_text_area()
                             .line_number_style()
-                            .unwrap_or_else(|| Style::default()),
+                            .unwrap_or_default(),
                     ),
                 );
                 lines.push(Line::from(spans));
@@ -135,7 +97,7 @@ impl<'a> Renderer<'a> {
                     self.text_area
                         .get_text_area()
                         .line_number_style()
-                        .unwrap_or_else(|| Style::default()),
+                        .unwrap_or_default(),
                 ),
             );
             let mut char_count = 0;
@@ -144,7 +106,7 @@ impl<'a> Renderer<'a> {
                 if v.is_empty() {
                     continue;
                 }
-                let current_char_count = char_count.clone();
+                let current_char_count = char_count;
                 char_count += v.chars().count();
                 // do not need to split the current span
                 if char_count < self.text_area.get_text_area().cursor().1 || cursor_set {
@@ -159,12 +121,10 @@ impl<'a> Renderer<'a> {
                         } else {
                             0
                         };
-                    spans.push(
-                        into_span((style, v.get(0..cursor_pos).unwrap_or_else(|| &v))).unwrap(),
-                    );
+                    spans.push(into_span((style, v.get(0..cursor_pos).unwrap_or(v))).unwrap());
                     if cursor_pos < v.len() {
                         spans.push(Span::styled(
-                            v.get(cursor_pos..cursor_pos + 1).unwrap_or_else(|| &v),
+                            v.get(cursor_pos..cursor_pos + 1).unwrap_or(v),
                             Style::default().add_modifier(Modifier::REVERSED),
                         ));
                         spans.push(into_span((style, &v[cursor_pos + 1..])).unwrap());

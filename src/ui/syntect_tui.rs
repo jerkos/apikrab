@@ -1,6 +1,6 @@
-pub fn into_span<'a>(
-    (style, content): (syntect::highlighting::Style, &'a str),
-) -> anyhow::Result<ratatui::text::Span<'a>> {
+pub fn into_span(
+    (style, content): (syntect::highlighting::Style, &str),
+) -> anyhow::Result<ratatui::text::Span<'_>> {
     Ok(ratatui::text::Span::styled(
         String::from(content),
         translate_style(style)?,

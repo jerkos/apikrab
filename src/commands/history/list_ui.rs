@@ -71,7 +71,7 @@ impl HistoryUI {
         .block(Block::default().borders(Borders::ALL).title("History"))
         .highlight_style(selected_style)
         //.highlight_symbol(">> ")
-        .widths(&[
+        .widths([
             Constraint::Percentage(15),
             Constraint::Percentage(15),
             Constraint::Percentage(30),

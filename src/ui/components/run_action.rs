@@ -18,7 +18,6 @@ impl Component for RunAction<'_> {
         area: Rect,
         current_active_area: ActiveArea,
     ) -> io::Result<()> {
-        self.text_areas
-            .render::<B>(frame, area, current_active_area)
+        self.text_areas.render(frame, area, current_active_area)
     }
 }

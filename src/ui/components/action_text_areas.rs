@@ -3,37 +3,25 @@ use crate::{
     ui::{
         app::ActiveArea,
         custom_renderer::{Renderer, Viewport},
-        helpers::{highlight_if_needed, payload_as_str_pretty, Component},
-        syntect_tui::into_span,
+        helpers::{highlight_if_needed, payload_as_str_pretty},
     },
 };
-use colored::Colorize;
+
 use ratatui::{
-    buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
-};
-use std::fmt::Write;
-use syntect::{
-    easy::HighlightLines,
-    highlighting::{Color as SynColor, ThemeSet},
-    parsing::SyntaxSet,
-    util::{as_24_bit_terminal_escaped, LinesWithEndings},
+    widgets::{Block, Borders},
 };
 
 #[derive(Clone)]
 pub struct TextArea<'a> {
     pub(crate) text_area: tui_textarea::TextArea<'a>,
-    pub(crate) viewport: Viewport,
 }
 
 impl<'a> TextArea<'a> {
     pub fn new(tui_text_area: tui_textarea::TextArea<'a>) -> Self {
         Self {
             text_area: tui_text_area,
-            viewport: Viewport::default(),
         }
     }
 
@@ -63,7 +51,7 @@ impl<'a> TextArea<'a> {
     }
 }
 
-fn text_area<'a>(name: &'a str) -> TextArea<'a> {
+fn text_area(name: &str) -> TextArea<'_> {
     let mut tui_text_area = tui_textarea::TextArea::default();
     tui_text_area.set_line_number_style(Style::default().bg(Color::DarkGray));
     tui_text_area.set_block(
@@ -76,8 +64,8 @@ fn text_area<'a>(name: &'a str) -> TextArea<'a> {
 }
 
 pub trait DisplayFromAction: Send + Sync {
-    fn set_left_text_area_text<'a>(&self, action: &Action, text_area: &mut TextArea<'a>);
-    fn set_right_text_area_text<'a>(&self, action: &Action, text_area: &mut TextArea<'a>);
+    fn set_left_text_area_text(&self, action: &Action, text_area: &mut TextArea<'_>);
+    fn set_right_text_area_text(&self, action: &Action, text_area: &mut TextArea<'_>);
     fn get_left_active_area(&self) -> ActiveArea;
     fn get_right_active_area(&self) -> ActiveArea;
 }
@@ -110,7 +98,7 @@ impl<'a> ActionTextAreas<'a> {
         }
     }
 
-    pub fn render<B: ratatui::prelude::Backend>(
+    pub fn render(
         &mut self,
         frame: &mut ratatui::prelude::Frame,
         area: Rect,
@@ -161,13 +149,13 @@ impl<'a> ActionTextAreas<'a> {
 pub struct Examples {}
 
 impl DisplayFromAction for Examples {
-    fn set_left_text_area_text<'a>(&self, action: &Action, left_text_area: &mut TextArea<'a>) {
+    fn set_left_text_area_text(&self, action: &Action, left_text_area: &mut TextArea<'_>) {
         let body_ex = payload_as_str_pretty(action.body_example.as_ref()).unwrap();
         left_text_area.clear_text_area();
         left_text_area.set_text_inner(&body_ex);
     }
 
-    fn set_right_text_area_text<'a>(&self, action: &Action, right_text_area: &mut TextArea<'a>) {
+    fn set_right_text_area_text(&self, action: &Action, right_text_area: &mut TextArea<'_>) {
         let resp_ex = payload_as_str_pretty(action.response_example.as_ref()).unwrap();
         right_text_area.clear_text_area();
         right_text_area.set_text_inner(&resp_ex);
@@ -184,13 +172,13 @@ impl DisplayFromAction for Examples {
 
 pub struct DomainActions {}
 impl DisplayFromAction for DomainActions {
-    fn set_left_text_area_text<'a>(&self, action: &Action, text_area: &mut TextArea<'a>) {
+    fn set_left_text_area_text(&self, action: &Action, text_area: &mut TextArea<'_>) {
         let value = serde_json::to_string_pretty(&action.actions).unwrap_or("".to_string());
         text_area.clear_text_area();
         text_area.set_text_inner(&value);
     }
 
-    fn set_right_text_area_text<'a>(&self, action: &Action, text_area: &mut TextArea<'a>) {
+    fn set_right_text_area_text(&self, _action: &Action, text_area: &mut TextArea<'_>) {
         text_area.clear_text_area();
         text_area.set_text_inner("");
     }
