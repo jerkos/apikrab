@@ -1,14 +1,27 @@
+use crate::commands::project;
+use crate::commands::run::Run;
+use crate::commands::run::_printer::Printer;
+use crate::commands::run::_progress_bar::init_progress_bars;
+use crate::commands::run::action::RunActionArgs;
 use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
+use crate::http::Api;
 use crate::ui::components::action_text_areas::DomainActions;
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
 use crossterm::event::{self};
+use indicatif::ProgressDrawTarget;
 use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
+use std::borrow::BorrowMut;
+use std::collections::HashMap;
+use std::future::IntoFuture;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::{io, thread};
-use tokio::runtime::Handle;
+use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::sync::{mpsc, oneshot};
 use tui_textarea::{Input, Key};
 
 use super::components::action_list::ActionList;
@@ -31,7 +44,18 @@ pub enum ActiveArea {
     Result,
 }
 
-#[derive(Clone)]
+lazy_static! {
+    pub static ref EXAMPLE: Box<dyn DisplayFromAction> = Box::new(Examples {});
+    pub static ref DOMAIN_ACTION: Box<dyn DisplayFromAction> = Box::new(DomainActions {});
+    pub static ref RUNTIME: Runtime = Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+    pub static ref CHANNELS: Arc<Mutex<(mpsc::Sender<Vec<Vec<bool>>>, mpsc::Receiver<Vec<Vec<bool>>>)>> =
+        Arc::new(Mutex::new(mpsc::channel::<Vec<Vec<bool>>>(1)));
+}
+
 pub(crate) struct App<'a> {
     db: Box<dyn Db>,
     active_area: ActiveArea,
@@ -43,15 +67,17 @@ pub(crate) struct App<'a> {
     run_action_pane: RunAction<'a>,
     current_action: Option<Action>,
     action_has_changed: bool,
-}
-
-lazy_static! {
-    pub static ref EXAMPLE: Box<dyn DisplayFromAction> = Box::new(Examples {});
-    pub static ref DOMAIN_ACTION: Box<dyn DisplayFromAction> = Box::new(DomainActions {});
+    tx: mpsc::Sender<anyhow::Result<Vec<Vec<bool>>>>,
+    rx: mpsc::Receiver<anyhow::Result<Vec<Vec<bool>>>>,
 }
 
 impl<'a> App<'a> {
-    pub fn new(projects: Vec<Project>, db_handler: Box<dyn Db>) -> Self {
+    pub fn new(
+        projects: Vec<Project>,
+        db_handler: Box<dyn Db>,
+        tx: mpsc::Sender<anyhow::Result<Vec<Vec<bool>>>>,
+        rx: mpsc::Receiver<anyhow::Result<Vec<Vec<bool>>>>,
+    ) -> Self {
         Self {
             db: db_handler,
             active_area: ActiveArea::ProjectPane,
@@ -63,30 +89,57 @@ impl<'a> App<'a> {
             action_text_areas: ActionTextAreas::new("Body", "Response", &EXAMPLE),
             run_action_pane: RunAction {
                 text_areas: ActionTextAreas::new("Action", "Response", &DOMAIN_ACTION),
+                action_name: None,
+                is_running: false,
+                status: None,
             },
             current_action: None,
             action_has_changed: false,
+            tx,
+            rx,
         }
     }
 
     fn update_actions(&mut self) {
         let handle = Handle::current();
-        let self_cloned = self.clone();
 
+        let projects = self.projects.clone();
+        let db = self.db.clone();
         let actions = thread::spawn(move || {
             handle.block_on(async move {
-                let projects = self_cloned.projects;
+                //let projects = self_cloned.projects;
                 let selected_item = projects.items[projects.state.selected().unwrap()].clone();
-                self_cloned
-                    .db
-                    .get_actions(Some(&selected_item.name))
-                    .await
-                    .unwrap()
+                db.get_actions(Some(&selected_item.name)).await.unwrap()
             })
         })
         .join()
         .unwrap();
         self.actions.items = actions;
+    }
+
+    fn run_action(&mut self) {
+        let action = self.current_action.clone().unwrap();
+
+        let db = self.db.clone();
+        let api = Api::new(Some(5), false);
+        let mut ctx = HashMap::new();
+        let (multi, pb) = init_progress_bars(action.actions.len() as u64);
+        multi.set_draw_target(ProgressDrawTarget::hidden());
+        pb.set_draw_target(ProgressDrawTarget::hidden());
+        let mut printer = Printer::new(true, false, false);
+        let tx = self.tx.clone();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(3000)).await;
+            let mut results: Vec<Vec<bool>> = vec![];
+            for action in &action.actions {
+                let r = action
+                    .run_with_tests(None, &mut ctx, &*db, &api, &mut printer, &multi, &pb)
+                    .await;
+                results.push(r);
+            }
+            tx.send(Ok(results)).await.unwrap();
+        });
     }
 
     fn set_current_action(&mut self) {
@@ -155,8 +208,7 @@ impl<'a> App<'a> {
                     .render(frame, right_layout[1], self.active_area)?;
                 self.action_has_changed = false;
 
-                self.run_action_pane.text_areas.clear_text_areas = true;
-                self.run_action_pane.text_areas.action = self.current_action.clone();
+                self.run_action_pane.on_new_action(action.clone());
             } else {
                 self.action_text_areas
                     .render(frame, right_layout[1], self.active_area)?;
@@ -172,7 +224,10 @@ impl UIRunner for App<'_> {
         let ev = event::read()?;
         match ev.into() {
             Input { key: Key::Esc, .. } => match self.active_area {
-                ActiveArea::BodyExample | ActiveArea::ResponseExample => {
+                ActiveArea::BodyExample
+                | ActiveArea::ResponseExample
+                | ActiveArea::RunAction
+                | ActiveArea::DomainAction => {
                     self.active_area = ActiveArea::ActionPane;
                 }
                 // early escape
@@ -337,14 +392,30 @@ impl UIRunner for App<'_> {
                         .get_text_area_mut()
                         .input(input);
                 }
-                ActiveArea::DomainAction => {
-                    let _ = self
-                        .run_action_pane
-                        .text_areas
-                        .left_text_area
-                        .get_text_area_mut()
-                        .input(input);
-                }
+                ActiveArea::DomainAction => match input {
+                    Input {
+                        key: Key::Char('r'),
+                        ctrl: true,
+                        ..
+                    } => self.run_action(),
+                    _ => {
+                        let _ = self
+                            .run_action_pane
+                            .text_areas
+                            .left_text_area
+                            .get_text_area_mut()
+                            .input(input);
+                    }
+                },
+                // Run action
+                //ActiveArea::RunAction => match input {
+                //    Input {
+                //        key: Key::Char('r'),
+                //        ctrl: true,
+                //        ..
+                //    } => run_action(),
+                //    _ => {}
+                //},
                 // Action pane
                 ActiveArea::ActionPane => match input {
                     // Run action widget
@@ -395,6 +466,12 @@ impl UIRunner for App<'_> {
     }
 
     fn ui<B: Backend>(&mut self, f: &mut Frame) {
+        match self.rx.try_recv() {
+            Ok(r) => {
+                self.active_area = ActiveArea::ProjectPane;
+            }
+            Err(_) => {}
+        }
         let r = self.build_ui::<B>(f);
         if let Err(e) = r {
             println!("Error: {}", e);

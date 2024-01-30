@@ -8,7 +8,7 @@ use crate::http::FetchResult;
 use crate::utils::{val_or_join, SEP, SINGLE_INTERPOL_START};
 use clap::Args;
 use crossterm::style::Stylize;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -505,8 +505,7 @@ impl RunActionArgs {
         &'a mut self,
         http: &'a http::Api,
         db: &dyn Db,
-        multi: Option<&'a MultiProgress>,
-        pb: Option<&'a ProgressBar>,
+        display_pb: bool,
     ) -> anyhow::Result<Vec<Vec<bool>>> {
         // check input and return an error if needed
         if let Err(msg) = check_input(self) {
@@ -523,16 +522,20 @@ impl RunActionArgs {
         let mut printer = Printer::new(self.quiet, self.clipboard, self.grep);
 
         // creating progress bars here
-        let multi_bar = multi.cloned().unwrap_or(MultiProgress::new());
+        let multi_bar = MultiProgress::new();
+        if !display_pb {
+            multi_bar.set_draw_target(ProgressDrawTarget::hidden());
+        }
 
         // main progress bar
-        let main_pb = pb.cloned().unwrap_or_else(|| {
-            let main_pb = multi_bar.add(new_pb(
-                (self.chain.as_ref().map(|c| c.len()).unwrap_or(0) + 1) as u64,
-            ));
-            main_pb.enable_steady_tick(Duration::from_millis(100));
-            main_pb
-        });
+        let main_pb = multi_bar.add(new_pb(
+            (self.chain.as_ref().map(|c| c.len()).unwrap_or(0) + 1) as u64,
+        ));
+
+        if !display_pb {
+            main_pb.set_draw_target(ProgressDrawTarget::hidden());
+        }
+        main_pb.enable_steady_tick(Duration::from_millis(100));
 
         // prepare the data
         self.prepare()?;
