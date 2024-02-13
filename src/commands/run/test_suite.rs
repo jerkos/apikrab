@@ -39,7 +39,7 @@ impl TestSuiteArgs {
                 .run_with_tests(None, &mut ctx, db, api, printer, multi_progress, pb)
                 .await;
 
-            if !r.iter().all(|b| *b) {
+            if !r.1.iter().all(|b| b.iter().all(|b| b.is_success)) {
                 println!(
                     "Test suite {} failed on action url: {:?}",
                     self.name.red(),

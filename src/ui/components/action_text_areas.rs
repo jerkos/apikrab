@@ -26,7 +26,7 @@ impl<'a> TextArea<'a> {
     }
 
     // clearing a text area
-    fn clear_text_area(&mut self) {
+    pub fn clear_text_area(&mut self) {
         let text_area = &mut self.text_area;
         text_area.move_cursor(tui_textarea::CursorMove::Top);
         text_area.move_cursor(tui_textarea::CursorMove::Head);
@@ -37,7 +37,7 @@ impl<'a> TextArea<'a> {
         //}
     }
 
-    fn set_text_inner(&mut self, text: &str) {
+    pub fn set_text_inner(&mut self, text: &str) {
         self.text_area.insert_str(text);
         self.text_area.move_cursor(tui_textarea::CursorMove::Top)
     }
@@ -51,7 +51,7 @@ impl<'a> TextArea<'a> {
     }
 }
 
-fn text_area(name: &str) -> TextArea<'_> {
+pub fn text_area(name: &str) -> TextArea<'_> {
     let mut tui_text_area = tui_textarea::TextArea::default();
     tui_text_area.set_line_number_style(Style::default().bg(Color::DarkGray));
     tui_text_area.set_block(
@@ -167,27 +167,5 @@ impl DisplayFromAction for Examples {
 
     fn get_right_active_area(&self) -> ActiveArea {
         ActiveArea::ResponseExample
-    }
-}
-
-pub struct DomainActions {}
-impl DisplayFromAction for DomainActions {
-    fn set_left_text_area_text(&self, action: &Action, text_area: &mut TextArea<'_>) {
-        let value = serde_json::to_string_pretty(&action.actions).unwrap_or("".to_string());
-        text_area.clear_text_area();
-        text_area.set_text_inner(&value);
-    }
-
-    fn set_right_text_area_text(&self, _action: &Action, text_area: &mut TextArea<'_>) {
-        text_area.clear_text_area();
-        text_area.set_text_inner("");
-    }
-
-    fn get_left_active_area(&self) -> ActiveArea {
-        ActiveArea::DomainAction
-    }
-
-    fn get_right_active_area(&self) -> ActiveArea {
-        ActiveArea::Result
     }
 }

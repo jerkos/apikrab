@@ -25,6 +25,7 @@ pub enum Verb {
 
 #[derive(Debug, Clone)]
 pub struct FetchResult {
+    pub headers: HashMap<String, String>,
     pub response: String,
     pub status: u16,
     pub duration: Duration,
@@ -125,14 +126,29 @@ impl Api {
         let duration = start.elapsed();
 
         // getting status and response
-        let status = response.status();
-        let text: String = response.text().await?;
+        let response_status = response.status().as_u16();
+        let response_headers = response
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_string(),
+                    v.to_str()
+                        .map(|val| val.to_string())
+                        .unwrap_or("".to_string()),
+                )
+            })
+            .collect::<HashMap<String, String>>();
+        let response_text = response.text().await?;
+
         let fetch_result = FetchResult {
-            response: text,
-            status: status.as_u16(),
+            headers: response_headers,
+            response: response_text,
+            status: response_status,
             duration,
         };
 
+        //println!("{:?}", fetch_result);
         // return results
         Ok(fetch_result)
     }

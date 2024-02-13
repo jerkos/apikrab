@@ -8,7 +8,7 @@ use crate::http::FetchResult;
 use crate::utils::{val_or_join, SEP, SINGLE_INTERPOL_START};
 use clap::Args;
 use crossterm::style::Stylize;
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
+use indicatif::{MultiProgress, ProgressDrawTarget};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -506,7 +506,7 @@ impl RunActionArgs {
         http: &'a http::Api,
         db: &dyn Db,
         display_pb: bool,
-    ) -> anyhow::Result<Vec<Vec<bool>>> {
+    ) -> anyhow::Result<()> {
         // check input and return an error if needed
         if let Err(msg) = check_input(self) {
             eprintln!("{}", msg);
@@ -542,9 +542,6 @@ impl RunActionArgs {
 
         // vector to gather all actions
         let mut actions = vec![];
-
-        // vector to gather all function results
-        let mut final_results = vec![];
 
         // iterating possible action if it is a chained action
         for current_action_data in self.get_action_data().into_iter() {
@@ -582,19 +579,17 @@ impl RunActionArgs {
                 }
 
                 // run the action and push the result in the stack
-                final_results.push(
-                    runnable_action
-                        .run_with_tests(
-                            action.as_ref(),
-                            &mut ctx,
-                            db,
-                            http,
-                            &mut printer,
-                            &multi_bar,
-                            &main_pb,
-                        )
-                        .await,
-                );
+                let _ = runnable_action
+                    .run_with_tests(
+                        action.as_ref(),
+                        &mut ctx,
+                        db,
+                        http,
+                        &mut printer,
+                        &multi_bar,
+                        &main_pb,
+                    )
+                    .await;
 
                 main_pb.inc(1);
             } // end for
@@ -616,7 +611,6 @@ impl RunActionArgs {
         self.save_if_needed(db, &actions).await?;
         self.save_to_ts_if_needed(db, &actions).await?;
 
-        // returning results
-        Ok(final_results)
+        Ok(())
     }
 }

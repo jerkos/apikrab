@@ -1,12 +1,11 @@
-use crate::commands::project;
-use crate::commands::run::Run;
 use crate::commands::run::_printer::Printer;
 use crate::commands::run::_progress_bar::init_progress_bars;
-use crate::commands::run::action::RunActionArgs;
+use crate::commands::run::_test_checker::UnaryTestResult;
+use crate::commands::run::action::R;
 use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
+use crate::domain::DomainAction;
 use crate::http::Api;
-use crate::ui::components::action_text_areas::DomainActions;
 use crate::ui::helpers::{Stateful, StatefulList};
 use crate::ui::run_ui::UIRunner;
 use crossterm::event::{self};
@@ -14,21 +13,21 @@ use indicatif::ProgressDrawTarget;
 use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
-use std::borrow::BorrowMut;
+use serde_json::Value;
 use std::collections::HashMap;
-use std::future::IntoFuture;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{io, thread};
-use tokio::runtime::{Builder, Handle, Runtime};
-use tokio::sync::{mpsc, oneshot};
+use std::{io, vec};
+use tokio::sync::mpsc;
 use tui_textarea::{Input, Key};
 
 use super::components::action_list::ActionList;
-use super::components::action_text_areas::{ActionTextAreas, DisplayFromAction, Examples};
+use super::components::action_text_areas::{
+    text_area, ActionTextAreas, DisplayFromAction, Examples,
+};
 use super::components::project_list::ProjectList;
-use super::components::run_action::RunAction;
+use super::components::run_action::{ActiveTextArea, RunAction, RunStatus, TestStatus};
 use super::components::status_bar::status_bar;
+use super::custom_renderer;
 use super::helpers::Component;
 use lazy_static::lazy_static;
 
@@ -39,21 +38,18 @@ pub enum ActiveArea {
     ActionPane,
     BodyExample,
     ResponseExample,
+    // entire screen
     RunAction,
-    DomainAction,
-    Result,
+}
+
+#[derive(Debug)]
+pub enum Message {
+    RunResult(Vec<(Vec<R>, Vec<Vec<UnaryTestResult>>)>),
+    UpdateAction(Vec<Action>),
 }
 
 lazy_static! {
     pub static ref EXAMPLE: Box<dyn DisplayFromAction> = Box::new(Examples {});
-    pub static ref DOMAIN_ACTION: Box<dyn DisplayFromAction> = Box::new(DomainActions {});
-    pub static ref RUNTIME: Runtime = Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
-    pub static ref CHANNELS: Arc<Mutex<(mpsc::Sender<Vec<Vec<bool>>>, mpsc::Receiver<Vec<Vec<bool>>>)>> =
-        Arc::new(Mutex::new(mpsc::channel::<Vec<Vec<bool>>>(1)));
 }
 
 pub(crate) struct App<'a> {
@@ -67,17 +63,13 @@ pub(crate) struct App<'a> {
     run_action_pane: RunAction<'a>,
     current_action: Option<Action>,
     action_has_changed: bool,
-    tx: mpsc::Sender<anyhow::Result<Vec<Vec<bool>>>>,
-    rx: mpsc::Receiver<anyhow::Result<Vec<Vec<bool>>>>,
+    tx: mpsc::Sender<Message>,
+    rx: mpsc::Receiver<Message>,
 }
 
 impl<'a> App<'a> {
-    pub fn new(
-        projects: Vec<Project>,
-        db_handler: Box<dyn Db>,
-        tx: mpsc::Sender<anyhow::Result<Vec<Vec<bool>>>>,
-        rx: mpsc::Receiver<anyhow::Result<Vec<Vec<bool>>>>,
-    ) -> Self {
+    pub fn new(projects: Vec<Project>, db_handler: Box<dyn Db>) -> Self {
+        let (tx, rx) = mpsc::channel(100);
         Self {
             db: db_handler,
             active_area: ActiveArea::ProjectPane,
@@ -88,10 +80,19 @@ impl<'a> App<'a> {
             },
             action_text_areas: ActionTextAreas::new("Body", "Response", &EXAMPLE),
             run_action_pane: RunAction {
-                text_areas: ActionTextAreas::new("Action", "Response", &DOMAIN_ACTION),
+                active_text_area: Default::default(),
+                edit_text_area: text_area("Edit"),
+                edit_text_area_viewport: custom_renderer::Viewport::default(),
+                response_body_text_area: text_area("Response body"),
+                response_body_text_area_viewport: custom_renderer::Viewport::default(),
+                response_headers_text_area: text_area("Headers"),
+                response_headers_text_area_viewport: custom_renderer::Viewport::default(),
                 action_name: None,
-                is_running: false,
-                status: None,
+                project_name: None,
+                status: RunStatus::Idle,
+                test_status: TestStatus::NotRun,
+                test_results: None,
+                fetch_result: None,
             },
             current_action: None,
             action_has_changed: false,
@@ -100,45 +101,56 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Update the actions list
+    /// This function will spawn a new tokio task to fetch the actions
     fn update_actions(&mut self) {
-        let handle = Handle::current();
-
         let projects = self.projects.clone();
         let db = self.db.clone();
-        let actions = thread::spawn(move || {
-            handle.block_on(async move {
-                //let projects = self_cloned.projects;
-                let selected_item = projects.items[projects.state.selected().unwrap()].clone();
-                db.get_actions(Some(&selected_item.name)).await.unwrap()
-            })
-        })
-        .join()
-        .unwrap();
-        self.actions.items = actions;
+        let tx = self.tx.clone();
+
+        tokio::spawn(async move {
+            let selected_item = projects.items[projects.state.selected().unwrap()].clone();
+            let actions = db.get_actions(Some(&selected_item.name)).await.unwrap();
+            tx.send(Message::UpdateAction(actions)).await.unwrap();
+        });
     }
 
+    /// Run the current action
+    /// This function will spawn a new tokio task to run the action
     fn run_action(&mut self) {
-        let action = self.current_action.clone().unwrap();
+        let edit_content = self
+            .run_action_pane
+            .edit_text_area
+            .get_text_area()
+            .lines()
+            .join("\n");
+        let actions = serde_json::from_str::<Vec<DomainAction>>(&edit_content);
+        if actions.is_err() {
+            return;
+        }
+        let actions = actions.unwrap();
 
         let db = self.db.clone();
         let api = Api::new(Some(5), false);
         let mut ctx = HashMap::new();
-        let (multi, pb) = init_progress_bars(action.actions.len() as u64);
+        let (multi, pb) = init_progress_bars(actions.len() as u64);
         multi.set_draw_target(ProgressDrawTarget::hidden());
         pb.set_draw_target(ProgressDrawTarget::hidden());
         let mut printer = Printer::new(true, false, false);
         let tx = self.tx.clone();
 
+        // updating run action pane
+        self.run_action_pane.status = RunStatus::Running;
+
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(3000)).await;
-            let mut results: Vec<Vec<bool>> = vec![];
-            for action in &action.actions {
+            let mut results: Vec<(Vec<R>, Vec<Vec<UnaryTestResult>>)> = vec![];
+            for action in actions {
                 let r = action
                     .run_with_tests(None, &mut ctx, &*db, &api, &mut printer, &multi, &pb)
                     .await;
                 results.push(r);
             }
-            tx.send(Ok(results)).await.unwrap();
+            tx.send(Message::RunResult(results)).await.unwrap();
         });
     }
 
@@ -157,17 +169,19 @@ impl<'a> App<'a> {
             ])
             .split(frame.size());
 
-        if self.active_area == ActiveArea::RunAction
-            || self.active_area == ActiveArea::Result
-            || self.active_area == ActiveArea::DomainAction
-        {
+        if self.active_area == ActiveArea::RunAction {
             if self.current_action.is_none() {
                 return Ok(());
             }
-            //run_action.text_areas.clear_text_areas = true;
-            //run_action.text_areas.action = self.current_action.clone();
-            self.run_action_pane
-                .render::<B>(frame, all[0], self.active_area)?;
+            <RunAction as Component>::render::<B>(
+                &mut self.run_action_pane,
+                frame,
+                all[0],
+                self.active_area,
+            )?;
+
+            //(self.run_action_pane as &mut dyn Component)
+            //    .render::<B>(frame, all[0], self.active_area)?;
             return Ok(());
         }
 
@@ -221,13 +235,15 @@ impl<'a> App<'a> {
 
 impl UIRunner for App<'_> {
     fn handle_event(&mut self) -> io::Result<bool> {
+        // polling for an event
+        if !event::poll(Duration::from_millis(16))? {
+            return Ok(false);
+        }
+
         let ev = event::read()?;
         match ev.into() {
             Input { key: Key::Esc, .. } => match self.active_area {
-                ActiveArea::BodyExample
-                | ActiveArea::ResponseExample
-                | ActiveArea::RunAction
-                | ActiveArea::DomainAction => {
+                ActiveArea::BodyExample | ActiveArea::ResponseExample | ActiveArea::RunAction => {
                     self.active_area = ActiveArea::ActionPane;
                 }
                 // early escape
@@ -256,13 +272,18 @@ impl UIRunner for App<'_> {
                         .get_text_area_mut()
                         .input(input);
                 }
-                ActiveArea::DomainAction => {
-                    let _ = self
-                        .run_action_pane
-                        .text_areas
-                        .left_text_area
-                        .get_text_area_mut()
-                        .input(input);
+                ActiveArea::RunAction => {
+                    let active_text_area = match &self.run_action_pane.active_text_area {
+                        ActiveTextArea::Edit => &mut self.run_action_pane.edit_text_area,
+                        ActiveTextArea::ResponseBody => {
+                            &mut self.run_action_pane.response_body_text_area
+                        }
+                        ActiveTextArea::ResponseHeaders => {
+                            &mut self.run_action_pane.response_headers_text_area
+                        }
+                    };
+
+                    let _ = active_text_area.get_text_area_mut().input(input);
                 }
                 _ => {}
             },
@@ -289,13 +310,18 @@ impl UIRunner for App<'_> {
                         .get_text_area_mut()
                         .input(input);
                 }
-                ActiveArea::DomainAction => {
-                    let _ = self
-                        .run_action_pane
-                        .text_areas
-                        .left_text_area
-                        .get_text_area_mut()
-                        .input(input);
+                ActiveArea::RunAction => {
+                    let active_text_area = match &self.run_action_pane.active_text_area {
+                        ActiveTextArea::Edit => &mut self.run_action_pane.edit_text_area,
+                        ActiveTextArea::ResponseBody => {
+                            &mut self.run_action_pane.response_body_text_area
+                        }
+                        ActiveTextArea::ResponseHeaders => {
+                            &mut self.run_action_pane.response_headers_text_area
+                        }
+                    };
+
+                    let _ = active_text_area.get_text_area_mut().input(input);
                 }
                 _ => {}
             },
@@ -327,13 +353,18 @@ impl UIRunner for App<'_> {
                         .get_text_area_mut()
                         .input(input);
                 }
-                ActiveArea::DomainAction => {
-                    let _ = self
-                        .run_action_pane
-                        .text_areas
-                        .left_text_area
-                        .get_text_area_mut()
-                        .input(input);
+                ActiveArea::RunAction => {
+                    let active_text_area = match &self.run_action_pane.active_text_area {
+                        ActiveTextArea::Edit => &mut self.run_action_pane.edit_text_area,
+                        ActiveTextArea::ResponseBody => {
+                            &mut self.run_action_pane.response_body_text_area
+                        }
+                        ActiveTextArea::ResponseHeaders => {
+                            &mut self.run_action_pane.response_headers_text_area
+                        }
+                    };
+
+                    let _ = active_text_area.get_text_area_mut().input(input);
                 }
                 _ => {}
             },
@@ -365,16 +396,22 @@ impl UIRunner for App<'_> {
                         .get_text_area_mut()
                         .input(input);
                 }
-                ActiveArea::DomainAction => {
-                    let _ = self
-                        .run_action_pane
-                        .text_areas
-                        .left_text_area
-                        .get_text_area_mut()
-                        .input(input);
+                ActiveArea::RunAction => {
+                    let active_text_area = match &self.run_action_pane.active_text_area {
+                        ActiveTextArea::Edit => &mut self.run_action_pane.edit_text_area,
+                        ActiveTextArea::ResponseBody => {
+                            &mut self.run_action_pane.response_body_text_area
+                        }
+                        ActiveTextArea::ResponseHeaders => {
+                            &mut self.run_action_pane.response_headers_text_area
+                        }
+                    };
+
+                    let _ = active_text_area.get_text_area_mut().input(input);
                 }
                 _ => {}
             },
+
             // All others inputs
             input => match self.active_area {
                 ActiveArea::ResponseExample => {
@@ -392,38 +429,41 @@ impl UIRunner for App<'_> {
                         .get_text_area_mut()
                         .input(input);
                 }
-                ActiveArea::DomainAction => match input {
+                ActiveArea::RunAction => match input {
                     Input {
                         key: Key::Char('r'),
                         ctrl: true,
                         ..
-                    } => self.run_action(),
+                    } => {
+                        if self.run_action_pane.active_text_area == ActiveTextArea::Edit {
+                            self.run_action()
+                        }
+                    }
                     _ => {
-                        let _ = self
-                            .run_action_pane
-                            .text_areas
-                            .left_text_area
-                            .get_text_area_mut()
-                            .input(input);
+                        let active_text_area = match &self.run_action_pane.active_text_area {
+                            ActiveTextArea::Edit => &mut self.run_action_pane.edit_text_area,
+                            ActiveTextArea::ResponseBody => {
+                                &mut self.run_action_pane.response_body_text_area
+                            }
+                            ActiveTextArea::ResponseHeaders => {
+                                &mut self.run_action_pane.response_headers_text_area
+                            }
+                        };
+
+                        let _ = active_text_area.get_text_area_mut().input(input);
                     }
                 },
-                // Run action
-                //ActiveArea::RunAction => match input {
-                //    Input {
-                //        key: Key::Char('r'),
-                //        ctrl: true,
-                //        ..
-                //    } => run_action(),
-                //    _ => {}
-                //},
+
                 // Action pane
                 ActiveArea::ActionPane => match input {
                     // Run action widget
                     Input {
-                        key: Key::Char('g'),
-                        ctrl: true,
-                        ..
-                    } => self.active_area = ActiveArea::DomainAction,
+                        key: Key::Enter, ..
+                    } => {
+                        if self.current_action.is_some() {
+                            self.active_area = ActiveArea::RunAction
+                        }
+                    }
 
                     // go to response example widget
                     Input {
@@ -467,9 +507,49 @@ impl UIRunner for App<'_> {
 
     fn ui<B: Backend>(&mut self, f: &mut Frame) {
         match self.rx.try_recv() {
-            Ok(r) => {
-                self.active_area = ActiveArea::ProjectPane;
-            }
+            Ok(message) => match message {
+                Message::RunResult(r) => {
+                    // get last domain action results only. Means that  when we have
+                    // chained actions we keep the last one only.
+                    // Then, we have a vector of R which represents the fetch results
+                    // of cartesian product of all parameters (several urls) and an associated
+                    // vector of all tests results (several expect tests possible)
+                    let (fetch_results, test_result) = r.into_iter().last().unwrap();
+
+                    // assuming that we keep the last fetch result
+                    let fetch_result = fetch_results.into_iter().last().unwrap();
+                    self.run_action_pane.response_body_text_area.set_text_inner(
+                        &fetch_result
+                            .result
+                            .as_ref()
+                            .ok()
+                            .and_then(|r| {
+                                serde_json::from_str::<Value>(&r.response)
+                                    .and_then(|r| serde_json::to_string_pretty(&r))
+                                    .ok()
+                            })
+                            .unwrap_or("".to_string()),
+                    );
+                    self.run_action_pane
+                        .response_headers_text_area
+                        .set_text_inner(
+                            &fetch_result
+                                .result
+                                .as_ref()
+                                .ok()
+                                .map(|r| &r.headers)
+                                .and_then(|h| serde_json::to_string_pretty(h).ok())
+                                .unwrap_or("".to_string()),
+                        );
+                    self.run_action_pane.fetch_result = Some(fetch_result);
+                    self.run_action_pane.test_results =
+                        Some(test_result.into_iter().last().unwrap_or(vec![]));
+                }
+                // load other actions
+                Message::UpdateAction(actions) => {
+                    self.actions.items = actions;
+                }
+            },
             Err(_) => {}
         }
         let r = self.build_ui::<B>(f);

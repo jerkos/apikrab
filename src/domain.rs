@@ -10,7 +10,7 @@ use crate::{
         _printer::Printer,
         _progress_bar::{add_progress_bar_for_request, finish_progress_bar},
         _run_helper::{get_body, get_computed_urls, get_xtracted_path, ANONYMOUS_ACTION},
-        _test_checker::TestChecker,
+        _test_checker::{TestChecker, UnaryTestResult},
         action::R,
     },
     db::{
@@ -268,7 +268,7 @@ impl DomainAction {
         printer: &mut Printer,
         multi_progress: &MultiProgress,
         main_pb: &ProgressBar,
-    ) -> Vec<bool> {
+    ) -> (Vec<R>, Vec<Vec<UnaryTestResult>>) {
         let fetch_results = self
             .run(action_opt, db, http, multi_progress)
             .await
@@ -290,14 +290,17 @@ impl DomainAction {
             .collect_vec();
 
         if let Some(ref expected) = self.expect {
-            return TestChecker {
+            let test_results = TestChecker {
                 fetch_results: &fetch_results,
                 ctx,
                 expected,
+                printer
             }
             .check(get_action_name(action_opt), main_pb);
+            return (fetch_results, test_results);
         }
-        fetch_results.iter().map(|_| true).collect_vec()
+        // not test returning empty values
+        (fetch_results, vec![])
     }
 
     pub async fn run(

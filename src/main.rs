@@ -23,7 +23,6 @@ use http::Verb;
 use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
 use sqlx::{Column, Executor, Row};
-use tokio::sync::mpsc;
 
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
@@ -175,8 +174,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::Ui => {
             let projects = db_handler.get_projects().await?;
-            let (tx, rx) = mpsc::channel::<anyhow::Result<Vec<Vec<bool>>>>(100);
-            let mut ui = ui::app::App::new(projects, db_handler, tx, rx);
+            let mut ui = ui::app::App::new(projects, db_handler);
             ui.run_ui()?;
         }
         &mut Commands::PrintCompleteScript { shell } => {
