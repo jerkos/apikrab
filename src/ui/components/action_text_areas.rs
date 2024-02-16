@@ -31,13 +31,10 @@ impl<'a> TextArea<'a> {
         text_area.move_cursor(tui_textarea::CursorMove::Top);
         text_area.move_cursor(tui_textarea::CursorMove::Head);
 
-        //for _ in 0..1000 {
-        //    text_area.delete_newline();
         text_area.delete_str(100000);
-        //}
     }
 
-    pub fn set_text_inner(&mut self, text: &str) {
+    pub fn set_text_content(&mut self, text: &str) {
         self.text_area.insert_str(text);
         self.text_area.move_cursor(tui_textarea::CursorMove::Top)
     }
@@ -48,6 +45,10 @@ impl<'a> TextArea<'a> {
 
     pub fn get_text_area(&self) -> &tui_textarea::TextArea<'a> {
         &self.text_area
+    }
+
+    pub fn get_text_content(&self) -> String {
+        self.text_area.lines().join("\n")
     }
 }
 
@@ -78,6 +79,7 @@ pub struct ActionTextAreas<'a> {
     pub right_text_area: TextArea<'a>,
     pub r_viewport: Viewport,
     pub clear_text_areas: bool,
+    #[allow(clippy::borrowed_box)]
     pub displayer: &'a Box<dyn DisplayFromAction>,
 }
 
@@ -85,7 +87,7 @@ impl<'a> ActionTextAreas<'a> {
     pub fn new(
         left_text_area_name: &'a str,
         right_text_area_name: &'a str,
-        displayer: &'a Box<dyn DisplayFromAction>,
+        #[allow(clippy::borrowed_box)] displayer: &'a Box<dyn DisplayFromAction>,
     ) -> Self {
         Self {
             action: None,
@@ -133,11 +135,13 @@ impl<'a> ActionTextAreas<'a> {
         let left_renderer = Renderer {
             text_area: &self.left_text_area,
             viewport: &self.l_viewport,
+            extension: "json",
         };
 
         let right_renderer = Renderer {
             text_area: &self.right_text_area,
             viewport: &self.r_viewport,
+            extension: "json",
         };
 
         frame.render_widget(left_renderer, chunks[0]);
@@ -152,13 +156,13 @@ impl DisplayFromAction for Examples {
     fn set_left_text_area_text(&self, action: &Action, left_text_area: &mut TextArea<'_>) {
         let body_ex = payload_as_str_pretty(action.body_example.as_ref()).unwrap();
         left_text_area.clear_text_area();
-        left_text_area.set_text_inner(&body_ex);
+        left_text_area.set_text_content(&body_ex);
     }
 
     fn set_right_text_area_text(&self, action: &Action, right_text_area: &mut TextArea<'_>) {
         let resp_ex = payload_as_str_pretty(action.response_example.as_ref()).unwrap();
         right_text_area.clear_text_area();
-        right_text_area.set_text_inner(&resp_ex);
+        right_text_area.set_text_content(&resp_ex);
     }
 
     fn get_left_active_area(&self) -> ActiveArea {

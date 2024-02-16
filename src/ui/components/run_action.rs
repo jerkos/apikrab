@@ -1,16 +1,22 @@
 use std::io;
 
+use apikrab::serializer::SerDe;
 use ratatui::{layout::*, prelude::*, widgets::*};
+use serde_json::Value;
+use tokio::sync::mpsc::Sender;
 
 use crate::{
     commands::run::{_run_helper::ANONYMOUS_ACTION, _test_checker::UnaryTestResult, action::R},
-    db::dto::Action,
+    db::{db_trait::FileTypeSerializer, dto::Action},
+    domain::{DomainAction, DomainActions},
     ui::{
-        app::ActiveArea,
+        app::{ActiveArea, Message},
         custom_renderer::{self, Renderer},
         helpers::Component,
     },
 };
+
+use tui_textarea::{Input, Key};
 
 use super::action_text_areas::TextArea;
 
@@ -50,30 +56,87 @@ pub enum ActiveTextArea {
     ResponseHeaders,
 }
 
-//#[derive(Clone)]
 pub struct RunAction<'a> {
+    /// The action to run
     pub action_name: Option<String>,
+    /// The project name of the action
     pub project_name: Option<String>,
 
+    /// The active text area
     pub active_text_area: ActiveTextArea,
 
+    /// the extension of the file being edited for syntax highlighting
+    pub edit_extension: String,
+
+    /// The text area for editing the action
     pub edit_text_area: TextArea<'a>,
     pub edit_text_area_viewport: custom_renderer::Viewport,
 
+    /// The text area for the response body
     pub response_body_text_area: TextArea<'a>,
     pub response_body_text_area_viewport: custom_renderer::Viewport,
 
+    /// The text area for the response headers
     pub response_headers_text_area: TextArea<'a>,
     pub response_headers_text_area_viewport: custom_renderer::Viewport,
 
+    /// The status of the run
     pub status: RunStatus,
+    /// The status of the tests
     pub test_status: TestStatus,
+
+    /// The results of the tests
     pub test_results: Option<Vec<UnaryTestResult>>,
+
+    /// The result of the fetch
     pub fetch_result: Option<R>,
+
+    /// Whether the content has been changed and not saved
+    pub changed_content_not_saved: bool,
 }
 
 impl RunAction<'_> {
-    pub fn on_new_action(&mut self, action: Action) {
+    pub fn reset_response_with_status(&mut self, status: RunStatus) {
+        self.response_body_text_area.clear_text_area();
+        self.response_headers_text_area.clear_text_area();
+        self.status = status;
+        self.fetch_result = None;
+        self.test_status = TestStatus::NotRun;
+        self.test_results = None;
+    }
+
+    fn set_active_border_color(&mut self) {
+        vec![
+            &mut self.edit_text_area,
+            &mut self.response_body_text_area,
+            &mut self.response_headers_text_area,
+        ]
+        .into_iter()
+        .for_each(|t| {
+            let block = t
+                .get_text_area_mut()
+                .block()
+                .unwrap()
+                .clone()
+                .border_style(Style::default());
+            t.get_text_area_mut().set_block(block);
+        });
+
+        let active_text_area = match self.active_text_area {
+            ActiveTextArea::Edit => &mut self.edit_text_area,
+            ActiveTextArea::ResponseBody => &mut self.response_body_text_area,
+            ActiveTextArea::ResponseHeaders => &mut self.response_headers_text_area,
+        };
+        let block = active_text_area
+            .get_text_area_mut()
+            .block()
+            .unwrap()
+            .clone()
+            .border_style(Style::default().fg(Color::Green));
+        active_text_area.get_text_area_mut().set_block(block);
+    }
+
+    pub fn on_new_action(&mut self, action: Action, serializer: Option<&FileTypeSerializer>) {
         self.action_name = action
             .name
             .clone()
@@ -84,15 +147,61 @@ impl RunAction<'_> {
             .clone()
             .or_else(|| ANONYMOUS_ACTION.to_owned().into());
 
-        let value = serde_json::to_string_pretty(&action.actions).unwrap_or("".to_string());
+        let domain_actions: DomainActions = action.actions.into();
+        let actions = match serializer {
+            Some(s) => s.to_string(&domain_actions).unwrap_or("".to_string()),
+            None => "".to_string(),
+        };
         self.edit_text_area.clear_text_area();
-        self.edit_text_area.set_text_inner(&value);
-        self.response_body_text_area.clear_text_area();
-        self.response_headers_text_area.clear_text_area();
-        self.status = RunStatus::Idle;
-        self.fetch_result = None;
-        self.test_status = TestStatus::NotRun;
-        self.test_results = None;
+        self.edit_text_area.set_text_content(&actions);
+
+        self.reset_response_with_status(RunStatus::Idle);
+    }
+
+    pub fn on_run_action_result(&mut self, results: Vec<(Vec<R>, Vec<Vec<UnaryTestResult>>)>) {
+        // get last domain action results only. Means that  when we have
+        // chained actions we keep the last one only.
+        // Then, we have a vector of R which represents the fetch results
+        // of cartesian product of all parameters (several urls) and an associated
+        // vector of all tests results (several expect tests possible)
+        let (fetch_results, test_result) = results.into_iter().last().unwrap();
+
+        // assuming that we keep the last fetch result
+        let fetch_result = fetch_results.into_iter().last().unwrap();
+        self.response_body_text_area.set_text_content(
+            &fetch_result
+                .result
+                .as_ref()
+                .ok()
+                .and_then(|r| {
+                    serde_json::from_str::<Value>(&r.response)
+                        .and_then(|r| serde_json::to_string_pretty(&r))
+                        .ok()
+                })
+                .unwrap_or("".to_string()),
+        );
+        self.response_headers_text_area.set_text_content(
+            &fetch_result
+                .result
+                .as_ref()
+                .ok()
+                .map(|r| &r.headers)
+                .and_then(|h| serde_json::to_string_pretty(h).ok())
+                .unwrap_or("".to_string()),
+        );
+        self.fetch_result = Some(fetch_result);
+        self.test_results = Some(test_result.into_iter().last().unwrap_or(vec![]));
+    }
+
+    pub fn get_action_from_text_content(
+        &self,
+        file_type_serializer: &FileTypeSerializer,
+    ) -> Option<Vec<DomainAction>> {
+        let actions = self.edit_text_area.get_text_content();
+        let wrapper = file_type_serializer
+            .from_str::<DomainActions>(&actions)
+            .ok();
+        wrapper.map(|w| w.actions)
     }
 
     fn get_fetch_result_status_code(&self) -> u16 {
@@ -211,8 +320,19 @@ impl RunAction<'_> {
                 Line::from(vec![
                     Span::raw("Action: "),
                     Span::styled(
-                        format!("{} ", self.action_name.clone().unwrap_or_default()),
+                        self.action_name.clone().unwrap_or_default().to_string(),
                         Style::default().yellow().bold(),
+                    ),
+                    Span::styled(
+                        format!(
+                            " {}",
+                            if self.changed_content_not_saved {
+                                "(*)"
+                            } else {
+                                ""
+                            }
+                        ),
+                        Style::default().fg(Color::Red).bold(),
                     ),
                 ]),
                 Line::from(vec![Span::raw("\nProject: ")]),
@@ -246,8 +366,73 @@ impl RunAction<'_> {
             .on_dark_gray(),
         )
     }
+
+    pub fn handle_event(&mut self, input: Input, tx: Sender<Message>) {
+        match input {
+            Input { key: Key::Esc, .. } => {
+                tokio::spawn(async move {
+                    tx.send(Message::LeaveRunAction).await.unwrap();
+                });
+            }
+            Input {
+                key: Key::Char('r'),
+                ctrl: true,
+                ..
+            } => {
+                if self.active_text_area == ActiveTextArea::Edit {
+                    tokio::spawn(async move {
+                        tx.send(Message::RunAction).await.unwrap();
+                    });
+                }
+            }
+            Input {
+                key: Key::Char('s'),
+                ctrl: true,
+                ..
+            } => {
+                if self.active_text_area == ActiveTextArea::Edit {
+                    tokio::spawn(async move {
+                        tx.send(Message::SaveAction).await.unwrap();
+                    });
+                }
+            }
+            Input {
+                key: Key::Char('a'),
+                ctrl: true,
+                ..
+            } => self.active_text_area = ActiveTextArea::Edit,
+            Input {
+                key: Key::Char('b'),
+                ctrl: true,
+                ..
+            } => self.active_text_area = ActiveTextArea::ResponseBody,
+            Input {
+                key: Key::Char('h'),
+                ctrl: true,
+                ..
+            } => self.active_text_area = ActiveTextArea::ResponseHeaders,
+            input @ Input { key, .. } => {
+                let active_text_area = match &self.active_text_area {
+                    ActiveTextArea::Edit => &mut self.edit_text_area,
+                    ActiveTextArea::ResponseBody => &mut self.response_body_text_area,
+                    ActiveTextArea::ResponseHeaders => &mut self.response_headers_text_area,
+                };
+
+                let _ = active_text_area.get_text_area_mut().input(input);
+                if self.active_text_area == ActiveTextArea::Edit
+                    && key != Key::Left
+                    && key != Key::Right
+                    && key != Key::Up
+                    && key != Key::Down
+                {
+                    self.changed_content_not_saved = true;
+                }
+            }
+        }
+    }
 }
 
+/// The component for running an action
 impl Component for RunAction<'_> {
     fn render<B: Backend>(
         &mut self,
@@ -286,14 +471,14 @@ impl Component for RunAction<'_> {
             ])
             .split(layout[1]);
 
-        self.edit_text_area
-            .get_text_area_mut()
-            .set_block(Block::new().title("Edit").borders(Borders::ALL).green());
+        self.set_active_border_color();
 
         let edit_text_area_renderer = Renderer {
             text_area: &self.edit_text_area,
             viewport: &self.edit_text_area_viewport,
+            extension: "toml",
         };
+
         frame.render_widget(edit_text_area_renderer, editor_area[0]);
 
         let result_area = Layout::default()
@@ -315,6 +500,7 @@ impl Component for RunAction<'_> {
         let response_body_text_area_renderer = Renderer {
             text_area: &self.response_body_text_area,
             viewport: &self.response_body_text_area_viewport,
+            extension: "json",
         };
 
         frame.render_widget(response_body_text_area_renderer, result_text_area[0]);
@@ -322,6 +508,7 @@ impl Component for RunAction<'_> {
         let response_headers_text_area_renderer = Renderer {
             text_area: &self.response_headers_text_area,
             viewport: &self.response_headers_text_area_viewport,
+            extension: "json",
         };
 
         frame.render_widget(response_headers_text_area_renderer, result_text_area[1]);

@@ -32,13 +32,8 @@ impl<'a> Component for ActionList<'a> {
                 .iter()
                 .map(|a| {
                     let first_domain_action = &a.actions[0];
-                    let verb: String = first_domain_action.verb.clone();
-                    let url = first_domain_action
-                        .urls
-                        .iter()
-                        .next()
-                        .cloned()
-                        .unwrap_or_default();
+                    let verb = &first_domain_action.verb;
+                    let url = &first_domain_action.url;
                     let action_name = a.name.clone().unwrap_or(ANONYMOUS_ACTION.to_owned());
                     ListItem::new(vec![
                         Line::styled(action_name, Style::default().fg(Color::LightGreen).bold()),
@@ -80,12 +75,17 @@ impl<'a> Component for ActionList<'a> {
                             Span::styled(url, Style::default().fg(Color::LightBlue)),
                             Span::raw(" "),
                             Span::styled(
-                                if first_domain_action.body.1 {
-                                    "(form)"
-                                } else if first_domain_action.body.2 {
-                                    "(url encoded)"
-                                } else {
-                                    "(json)"
+                                match &first_domain_action.body {
+                                    Some(b) => {
+                                        if b.url_encoded {
+                                            "(form)"
+                                        } else if b.form_data {
+                                            "(url encoded)"
+                                        } else {
+                                            "(json)"
+                                        }
+                                    }
+                                    None => "",
                                 },
                                 Style::default().fg(Color::DarkGray),
                             ),

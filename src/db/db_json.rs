@@ -1,3 +1,4 @@
+use apikrab::serializer::SerDe;
 use async_trait::async_trait;
 use tokio::fs;
 
@@ -7,16 +8,17 @@ use crate::{
 };
 
 use super::{
-    db_trait::Db,
+    db_trait::{Db, FileTypeSerializer},
     dto::{Context, Project},
 };
 
-#[derive(Clone, Default)]
-pub struct JsonHandler {
+#[derive(Clone)]
+pub struct FileDb {
     pub root: Option<String>,
+    pub serializer: FileTypeSerializer,
 }
 
-impl JsonHandler {
+impl FileDb {
     fn get_root(&self) -> String {
         self.root
             .as_ref()
@@ -26,9 +28,13 @@ impl JsonHandler {
 }
 
 #[async_trait]
-impl Db for JsonHandler {
+impl Db for FileDb {
     fn box_clone(&self) -> Box<dyn Db> {
         Box::new(self.clone())
+    }
+
+    fn get_serializer(&self) -> Option<&FileTypeSerializer> {
+        Some(&self.serializer)
     }
 
     /// Return current configuration as key value from file conf.json
@@ -36,7 +42,12 @@ impl Db for JsonHandler {
     async fn get_conf(&self) -> anyhow::Result<Context> {
         Ok(Context {
             value: serde_json::from_str(
-                &fs::read_to_string(format!("{}/conf.json", self.get_root())).await?,
+                &fs::read_to_string(format!(
+                    "{}/conf.{}",
+                    self.get_root(),
+                    self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
+                ))
+                .await?,
             )?,
         })
     }
@@ -44,8 +55,13 @@ impl Db for JsonHandler {
     /// Overwrite the configuration file with the given context.
     async fn insert_conf(&self, context: &Context) -> anyhow::Result<i64> {
         fs::write(
-            format!("{}/conf.json", self.get_root()),
-            serde_json::to_string_pretty(&context.value)?,
+            format!(
+                "{}/conf.{}",
+                self.get_root(),
+                self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
+            ),
+            self.serializer.to_string(&context.value)?,
+            //serde_json::to_string_pretty(&context.value)?,
         )
         .await?;
         Ok(0)
@@ -72,9 +88,17 @@ impl Db for JsonHandler {
         };
         let mut dir = fs::read_dir(dirname).await?;
         while let Some(entry) = dir.next_entry().await? {
-            actions.push(serde_json::from_str(
-                &fs::read_to_string(entry.path()).await?,
-            )?);
+            let path = entry.path();
+            let ending = self.serializer.ending(); //<T as SerDe>::ending(&self.serializer);
+            let target_ending = ending.as_str();
+            if path.extension().unwrap() == target_ending {
+                actions.push(
+                    self.serializer
+                        .from_str::<Action>(&fs::read_to_string(path).await?)?, //serde_json::from_str(
+                                                                                //    &fs::read_to_string(path).await?,
+                                                                                //)?
+                );
+            }
         }
         Ok(actions)
     }
@@ -88,13 +112,16 @@ impl Db for JsonHandler {
 
         fs::create_dir_all(&dirname).await?;
         // todo: update created date
+
         fs::write(
             format!(
-                "{}/{}.json",
+                "{}/{}.{}",
                 dirname,
-                action.name.as_ref().expect("Action name is required")
+                action.name.as_ref().expect("Action name is required"),
+                self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
             ),
-            serde_json::to_string_pretty(&action)?,
+            self.serializer.to_string(&action)?,
+            //serde_json::to_string_pretty(&action)?,
         )
         .await?;
         Ok(())
@@ -106,11 +133,20 @@ impl Db for JsonHandler {
             Some(p_name) => format!("{}/{}", self.get_root(), p_name),
             None => format!("{}/projects/default", self.get_root()),
         };
-
-        serde_json::from_str::<Action>(
-            &fs::read_to_string(format!("{}/{}.json", dirname, action_name)).await?,
+        self.serializer.from_str::<Action>(
+            &fs::read_to_string(format!(
+                "{}/{}.{}",
+                dirname,
+                action_name,
+                self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
+            ))
+            .await?,
         )
-        .map_err(|e: serde_json::Error| anyhow::anyhow!("Error parsing action: {}", e))
+
+        //serde_json::from_str::<Action>(
+        //    &fs::read_to_string(format!("{}/{}.json", dirname, action_name)).await?,
+        //)
+        //.map_err(|e: serde_json::Error| anyhow::anyhow!("Error parsing action: {}", e))
     }
 
     async fn rm_action(&self, action_name: &str, project: Option<&str>) -> anyhow::Result<u64> {
@@ -119,7 +155,13 @@ impl Db for JsonHandler {
             None => format!("{}/projects/default", self.get_root()),
         };
 
-        fs::remove_file(format!("{}/{}.json", dirname, action_name)).await?;
+        fs::remove_file(format!(
+            "{}/{}.{}",
+            dirname,
+            action_name,
+            self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
+        ))
+        .await?;
         Ok(1)
     }
 
@@ -158,12 +200,14 @@ impl Db for JsonHandler {
 
         fs::write(
             format!(
-                "{}/test-suites/{}/{}.json",
+                "{}/test-suites/{}/{}.{}",
                 self.get_root(),
                 test_suite_instance.test_suite_name.clone(),
-                test_suite_id
+                test_suite_id,
+                self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
             ),
-            serde_json::to_string_pretty(&test_suite_instance)?,
+            self.serializer.to_string(&test_suite_instance)?,
+            //serde_json::to_string_pretty(&test_suite_instance)?,
         )
         .await?;
 
@@ -182,9 +226,12 @@ impl Db for JsonHandler {
         ))
         .await?;
         while let Some(entry) = dir.next_entry().await? {
-            instances.push(serde_json::from_str(
-                &fs::read_to_string(entry.path()).await?,
-            )?);
+            instances.push(
+                self.serializer
+                    .from_str::<TestSuiteInstance>(&fs::read_to_string(entry.path()).await?)?, //serde_json::from_str(
+                                                                                               //&fs::read_to_string(entry.path()).await?,
+                                                                                               //)?
+            );
         }
         Ok(instances)
     }
@@ -193,11 +240,22 @@ impl Db for JsonHandler {
         Ok(Project {
             name: project_name.to_string(),
             // may not exist ?
+            conf: self.serializer.from_str(
+                &fs::read_to_string(format!(
+                    "{}/projects/conf.{}",
+                    self.get_root(),
+                    self.serializer.ending()
+                ))
+                .await
+                .unwrap_or_else(|_| "{}".to_string()),
+            )?,
+            /*
             conf: serde_json::from_str(
-                &fs::read_to_string(format!("{}/projects/conf.json", self.get_root()))
+                &fs::read_to_string(format!("{}/projects/conf.{}", self.get_root(), <T as SerDe>::ending(&self.serializer)))
                     .await
                     .unwrap_or_else(|_| "{}".to_string()),
             )?,
+            */
             ..Default::default()
         })
     }
@@ -206,10 +264,15 @@ impl Db for JsonHandler {
         fs::create_dir_all(format!("{}/projects/{}", self.get_root(), project.name)).await?;
 
         // adding conf json
-        let project_conf = format!("{}/projects/conf.json", self.get_root());
+        let project_conf = format!(
+            "{}/projects/conf.{}",
+            self.get_root(),
+            self.serializer.ending()
+        );
         if let Ok(value) = fs::try_exists(&project_conf).await {
             if !value {
-                fs::write(project_conf, serde_json::to_string_pretty(&project.conf)?).await?;
+                fs::write(project_conf, self.serializer.to_string(&project.conf)?).await?;
+                //fs::write(project_conf, serde_json::to_string_pretty(&project.conf)?).await?;
             }
         }
 

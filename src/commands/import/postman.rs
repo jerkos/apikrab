@@ -53,7 +53,7 @@ impl<'a, T: Db + Send + Sync + 'a> PostmanImporter<'a, T> {
         let r = match header {
             HeaderUnion::HeaderArray(h_cls) => h_cls
                 .iter()
-                .map(|h| vec![h.key.clone(), h.value.clone()].join(":"))
+                .map(|h| [h.key.clone(), h.value.clone()].join(":"))
                 .collect(),
             HeaderUnion::String(s) => vec![s.clone()],
         };

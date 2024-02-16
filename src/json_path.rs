@@ -428,23 +428,20 @@ fn evaluate<'a>(
         JspExp::Fn(fn_name, values) => match fn_name {
             Fn::Join => match current_value {
                 // join values of the array
-                Value::Array(array) => {
-                    println!("values: {:?}", values[0]);
-                    match &values[0] {
-                        JspExp::Value(_, v) => Some(Cow::Owned(Value::String(
-                            array
-                                .iter()
-                                .map(|v| match v {
-                                    Value::String(s) => s.clone(),
-                                    Value::Number(n) => n.to_string(),
-                                    _ => "".to_owned(),
-                                })
-                                .collect_vec()
-                                .join(v[0].trim_end_matches('\'').trim_start_matches('\'')),
-                        ))),
-                        _ => None,
-                    }
-                }
+                Value::Array(array) => match &values[0] {
+                    JspExp::Value(_, v) => Some(Cow::Owned(Value::String(
+                        array
+                            .iter()
+                            .map(|v| match v {
+                                Value::String(s) => s.clone(),
+                                Value::Number(n) => n.to_string(),
+                                _ => "".to_owned(),
+                            })
+                            .collect_vec()
+                            .join(v[0].trim_end_matches('\'').trim_start_matches('\'')),
+                    ))),
+                    _ => None,
+                },
                 _ => None,
             },
             Fn::Length => match current_value {

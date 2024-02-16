@@ -24,6 +24,7 @@ where
 }
 
 const STATUS_CODE: &str = "STATUS_CODE";
+const STATUS: &str = "STATUS";
 const JSON_INCLUDE: &str = "JSON_INCLUDE";
 const JSON_EQ: &str = "JSON_EQ";
 const INT: &str = "INT";
@@ -84,7 +85,7 @@ impl FromStr for TestFn {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(if s == STATUS_CODE {
+        Ok(if s == STATUS_CODE || s == STATUS {
             TestFn::StatusCode
         } else if s.starts_with(JSON_INCLUDE) {
             TestFn::JsonInclude(get_args::<String>(s, JSON_INCLUDE)?)
@@ -97,7 +98,9 @@ impl FromStr for TestFn {
         } else if s.starts_with(REGEX) {
             TestFn::Regex(regex::Regex::new(s)?)
         } else if s.starts_with(EMAIL) {
-            TestFn::Email(regex::Regex::new("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$")?)
+            TestFn::Email(regex::Regex::new(
+                r"^([a-z0-9_+]([a-z0-9_+.]*[a-z0-9_+])?)@([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6})",
+            )?)
         } else {
             TestFn::NoMatch
         })
@@ -108,17 +111,14 @@ pub struct TestChecker<'a> {
     pub fetch_results: &'a Vec<R>,
     pub ctx: &'a HashMap<String, String>,
     pub expected: &'a HashMap<String, String>,
-    pub printer: &'a Printer
+    pub printer: &'a Printer,
 }
 
 impl<'a> TestChecker<'a> {
-    /// tests are ran after finishing all the requests
-    /// So no need to pass the progress bar here to avoid stdout
-    /// conflicts
     pub fn print_err(&self, key: &str, got: &str, expected: &str, pb: &ProgressBar) {
         let gott = if got.is_empty() { "<empty str>" } else { got };
         let r = format!("   Expected '{}' to be `{}` got `{}`", key, expected, gott).red();
-        //println!("{}", r);
+        self.printer.p_info(|| pb.suspend(|| println!("{}", r)));
     }
 
     fn json_check(
@@ -128,7 +128,7 @@ impl<'a> TestChecker<'a> {
         test_json_result: Result<(), Box<dyn Any + Send>>,
         result: &FetchResult,
         json_to_test: String,
-        pb: &ProgressBar
+        pb: &ProgressBar,
     ) -> UnaryTestResult {
         match test_json_result {
             Ok(_) => UnaryTestResult::success(message),
@@ -151,7 +151,7 @@ impl<'a> TestChecker<'a> {
         key: &str,
         expected: &T,
         ctx: &HashMap<String, String>,
-        pb: &ProgressBar
+        pb: &ProgressBar,
     ) -> UnaryTestResult
     where
         T: FromStr + Display + PartialEq,
@@ -184,7 +184,7 @@ impl<'a> TestChecker<'a> {
         key: &str,
         regex: &regex::Regex,
         ctx: &HashMap<String, String>,
-        pb: &ProgressBar
+        pb: &ProgressBar,
     ) -> UnaryTestResult {
         match ctx.get(key) {
             Some(ctx_value) => {
@@ -195,8 +195,8 @@ impl<'a> TestChecker<'a> {
                 UnaryTestResult {
                     is_success: !is_err,
                     message,
-                    expected: Some(format!("match {}", regex.as_str().to_string())),
-                    got: Some(format!("unmatch {}", ctx_value.to_string())),
+                    expected: Some(format!("match {}", regex.as_str())),
+                    got: Some(format!("unmatch {}", ctx_value)),
                 }
             }
             None => {
@@ -210,7 +210,7 @@ impl<'a> TestChecker<'a> {
         &self,
         result: &FetchResult,
         ctx: &HashMap<String, String>,
-        pb: &ProgressBar
+        pb: &ProgressBar,
     ) -> Vec<UnaryTestResult> {
         self.expected
             .iter()
@@ -241,7 +241,7 @@ impl<'a> TestChecker<'a> {
                                 test_include_result,
                                 result,
                                 json_to_test,
-                                pb
+                                pb,
                             )
                         }
                         Ok(TestFn::JsonEq(json_to_test)) => {
@@ -251,7 +251,14 @@ impl<'a> TestChecker<'a> {
                                     from_str::<Value>(&json_to_test).unwrap()
                                 );
                             });
-                            self.json_check(message, JSON_EQ, test_eq_result, result, json_to_test, pb)
+                            self.json_check(
+                                message,
+                                JSON_EQ,
+                                test_eq_result,
+                                result,
+                                json_to_test,
+                                pb,
+                            )
                         }
                         Ok(TestFn::Int(expected)) => {
                             self.default_check(message, key, &expected, ctx, pb)
@@ -299,25 +306,24 @@ impl<'a> TestChecker<'a> {
                     let all_tests_passed = unary_test_results.iter().all(|r| r.is_success);
                     if all_tests_passed {
                         self.printer.p_info(|| {
-                        pb.suspend(|| {
-                            println!(
-                                "   {} {}",
-                                "🦄 ??Checking...".green(),
-                                "Tests passed ✅".green()
-                            )
+                            pb.suspend(|| {
+                                println!(
+                                    "   {} {}",
+                                    "🦄 ??Checking...".green(),
+                                    "Tests passed ✅".green()
+                                )
+                            });
                         });
-                    });
-
                     } else {
                         self.printer.p_info(|| {
-                        pb.suspend(|| {
-                            println!(
-                                "   {} {}",
-                                "🦄 ??Checking...".red(),
-                                " Some tests failed ❌".red()
-                            )
+                            pb.suspend(|| {
+                                println!(
+                                    "   {} {}",
+                                    "🦄 ??Checking...".red(),
+                                    " Some tests failed ❌".red()
+                                )
+                            });
                         });
-                    });
                     }
                     unary_test_results
                 }
@@ -325,7 +331,6 @@ impl<'a> TestChecker<'a> {
                     self.printer.p_info(|| {
                         pb.suspend(|| {
                             println!("   {} {} ❌", "🦄 ??Checking...".red(), status_code);
-
                         });
                     });
                     vec![]

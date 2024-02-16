@@ -572,12 +572,6 @@ impl RunActionArgs {
 
             // running each actions
             for runnable_action in runnable_actions.iter() {
-                // check if it can be run
-                if !runnable_action.can_be_run() {
-                    printer.p_info(|| println!("Action cannot be run due to missing information"));
-                    continue;
-                }
-
                 // run the action and push the result in the stack
                 let _ = runnable_action
                     .run_with_tests(

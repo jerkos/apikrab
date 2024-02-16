@@ -66,7 +66,7 @@ pub trait UIRunner {
         let mut stdout = stdout.lock();
 
         enable_raw_mode()?;
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen)?;
 
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
@@ -79,7 +79,6 @@ pub trait UIRunner {
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
-            DisableMouseCapture
         )?;
         terminal.show_cursor()?;
 

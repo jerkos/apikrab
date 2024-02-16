@@ -45,8 +45,8 @@ impl<'a, T: Db + Send + Sync> Import for OpenapiV3Importer<'a, T> {
             let item = path_item.as_item();
 
             if let Some(element) = item {
-                let verbs = vec!["GET", "POST", "PUT", "DELETE"];
-                let operations = vec![
+                let verbs = ["GET", "POST", "PUT", "DELETE"];
+                let operations = [
                     element.get.as_ref(),
                     element.post.as_ref(),
                     element.put.as_ref(),

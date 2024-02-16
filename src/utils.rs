@@ -188,39 +188,39 @@ pub fn parse_multiple_conf_as_opt_with_grouping_and_interpolation(
     conf: &str,
     ctx: &HashMap<String, String>,
     interpol: Interpol,
-) -> Vec<Option<HashMap<String, String>>> {
+) -> Option<Vec<HashMap<String, String>>> {
     let p = replace_with_conf(conf, ctx, interpol);
     if p.is_empty() {
-        return vec![None];
+        return None;
     }
     let parsed_conf = _parse_multiple_conf_as_opt_with_grouping(p);
     if parsed_conf.is_empty() {
-        return vec![None];
+        return None;
     }
-    parsed_conf
-        .values()
-        .fold(vec![], |acc, values| {
-            if acc.is_empty() {
-                return values.iter().map(|v| vec![v.clone()]).collect::<Vec<_>>();
-            }
-            let z = acc.into_iter().cartesian_product(values);
-            z.map(|(mut acc, value)| {
-                acc.push(value.clone());
-                acc
+    Some(
+        parsed_conf
+            .values()
+            .fold(vec![], |acc, values| {
+                if acc.is_empty() {
+                    return values.iter().map(|v| vec![v.clone()]).collect::<Vec<_>>();
+                }
+                let z = acc.into_iter().cartesian_product(values);
+                z.map(|(mut acc, value)| {
+                    acc.push(value.clone());
+                    acc
+                })
+                .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>()
-        })
-        .iter()
-        .map(|v| {
-            Some(
+            .iter()
+            .map(|v| {
                 parsed_conf
                     .iter()
                     .zip(v.iter())
                     .map(|((k, _), v)| (k.clone(), v.clone()))
-                    .collect(),
-            )
-        })
-        .collect()
+                    .collect()
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// For query params and path params

@@ -1,8 +1,7 @@
 use crossterm::style::Stylize;
 
 use crate::utils::{
-    parse_multiple_conf, parse_multiple_conf_as_opt_with_grouping_and_interpolation,
-    parse_multiple_conf_with_opt, replace_with_conf, Interpol,
+    parse_multiple_conf, parse_multiple_conf_with_opt, replace_with_conf, Interpol,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -99,7 +98,7 @@ fn complete_url(url: &str) -> Cow<str> {
     }
 }
 
-fn get_full_url<'a>(project_url: Option<&'a str>, action_url: &'a str) -> Cow<'a, str> {
+pub fn get_full_url<'a>(project_url: Option<&'a str>, action_url: &'a str) -> Cow<'a, str> {
     match project_url {
         Some(main_url) => {
             if main_url.is_empty() {
@@ -115,41 +114,25 @@ fn get_full_url<'a>(project_url: Option<&'a str>, action_url: &'a str) -> Cow<'a
 /// using the cartesian product of all values
 /// te generate all possible urls
 pub fn get_computed_urls(
-    path_params: &str,
-    project_url: Option<&str>,
-    action_url: &str,
-    ctx: &HashMap<String, String>,
+    path_params: Option<&Vec<HashMap<String, String>>>,
+    full_url: &str,
 ) -> HashSet<String> {
-    if action_url.is_empty() {
-        return HashSet::new();
+    match path_params {
+        Some(path_params) => {
+            let all_path_params = path_params
+                .iter()
+                .map(|params| {
+                    let mut url = full_url.to_owned();
+                    for (k, v) in params.iter() {
+                        url = url.replace(format!("{{{}}}", k).as_str(), v);
+                    }
+                    url
+                })
+                .collect::<HashSet<_>>();
+            all_path_params
+        }
+        None => HashSet::from([full_url.to_owned()]),
     }
-
-    let full_url = get_full_url(project_url, action_url).into_owned();
-
-    // returning url with no interpolation
-    // to be checked later
-    if path_params.is_empty() {
-        return HashSet::from([full_url]);
-    }
-
-    let all_path_params = parse_multiple_conf_as_opt_with_grouping_and_interpolation(
-        path_params,
-        ctx,
-        Interpol::SimpleInterpol,
-    );
-
-    all_path_params
-        .iter()
-        .map(|params| {
-            let mut url = full_url.clone();
-            if let Some(params) = params {
-                for (k, v) in params.iter() {
-                    url = url.replace(format!("{{{}}}", k).as_str(), v);
-                }
-            }
-            url
-        })
-        .collect()
 }
 
 /// Extract path interpolation

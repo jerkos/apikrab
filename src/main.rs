@@ -11,13 +11,14 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::commands::history::History;
+use apikrab::serializer::{Json, Toml};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use commands::history::HistoryCommands;
 use commands::run::action::RunActionArgs;
-use db::db_json::JsonHandler;
+use db::db_json::FileDb;
 use db::db_sqlite::SqliteDb;
-use db::db_trait::Db;
+use db::db_trait::{Db, FileTypeSerializer};
 use futures::StreamExt;
 use http::Verb;
 use lazy_static::lazy_static;
@@ -29,13 +30,28 @@ use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
 use crate::ui::run_ui::UIRunner;
 
-#[derive(Debug, Clone, Default)]
-pub enum DBEngine {
-    Sqlite,
+/// File system serializer
+#[derive(Debug, Default, Clone)]
+pub enum FsSerializer {
+    Json,
     #[default]
-    Fs,
+    Toml,
 }
 
+/// Database engine
+#[derive(Debug, Clone)]
+pub enum DBEngine {
+    Sqlite,
+    Fs(FsSerializer),
+}
+
+impl Default for DBEngine {
+    fn default() -> Self {
+        DBEngine::Fs(FsSerializer::Toml)
+    }
+}
+
+/// Configuration
 #[derive(Debug, Clone)]
 pub struct Config {
     pub(crate) db_engine: DBEngine,
@@ -45,18 +61,22 @@ pub struct Config {
 lazy_static! {
     pub static ref HOME_DIR: PathBuf = home::home_dir().unwrap();
     pub static ref DEFAULT_DB_PATH: String = format!("{}/.config/qapi", HOME_DIR.to_str().unwrap());
-    pub static ref CONFIG: Mutex<Config> = Mutex::new(Config {
-        db_engine: DBEngine::Fs,
+    pub static ref DEFAULT_CONFIG: Mutex<Config> = Mutex::new(Config {
+        db_engine: DBEngine::Fs(FsSerializer::Toml),
         db_path: Some(DEFAULT_DB_PATH.clone())
     });
 }
 
 #[allow(clippy::await_holding_lock)]
-async fn get_db() -> Box<dyn Db + 'static> {
-    let config = CONFIG.lock().unwrap();
+async fn get_db() -> Box<dyn Db> {
+    let config = DEFAULT_CONFIG.lock().unwrap();
     match &config.db_engine {
-        DBEngine::Fs => Box::new(JsonHandler {
+        DBEngine::Fs(ser) => Box::new(FileDb {
             root: config.db_path.clone(),
+            serializer: match ser {
+                FsSerializer::Toml => FileTypeSerializer::Toml(Toml {}),
+                FsSerializer::Json => FileTypeSerializer::Json(Json {}),
+            },
         }),
         DBEngine::Sqlite => {
             let mut sqlite = SqliteDb { conn: None };

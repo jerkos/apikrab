@@ -39,6 +39,7 @@ regex = "1.10.2"
 colored_json = "4.1.0"
 uuid = { version = "1.6.1", features = ["serde", "v4"] }
 syntect = "5.1.0"
+toml = "0.8.10"
 
 [dependencies.pyo3]
 version = "0.20.0"

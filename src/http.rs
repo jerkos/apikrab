@@ -1,5 +1,4 @@
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
@@ -8,6 +7,8 @@ use strum::{Display, EnumString};
 
 use reqwest::multipart::{Form, Part};
 use reqwest::Method;
+
+use crate::domain::Body;
 
 #[derive(Debug, Clone, EnumString, Display)]
 pub enum Verb {
@@ -62,7 +63,7 @@ impl Api {
         verb: &str,
         headers: &HashMap<String, String>,
         query_params: Option<&HashMap<String, String>>,
-        body: (Option<Cow<'_, str>>, bool, bool),
+        body: Option<Body>, //(Option<Cow<'_, str>>, bool, bool),
     ) -> anyhow::Result<FetchResult> {
         // building request
         let mut builder = match Verb::from_str(verb)? {
@@ -88,36 +89,31 @@ impl Api {
         builder = builder.headers(header_map);
 
         // body
-        let is_url_encoded = body.1;
-        let is_form_data = body.2;
-        let b = body.0;
-        builder = match (is_url_encoded, is_form_data) {
-            (true, true) => panic!("Cannot have both url encoded and form data"),
-            (false, false) => {
-                if b.is_some() {
-                    builder = builder.body(b.as_ref().unwrap().to_string());
-                }
-                builder
-            }
-            (true, false) => builder.form(&serde_json::from_str::<HashMap<String, String>>(
-                b.as_ref().unwrap(),
-            )?),
-            (false, true) => {
-                let mut form = Form::new();
-                let body = b.as_ref().unwrap();
-                for (part_name, v) in serde_json::from_str::<HashMap<String, String>>(body)? {
-                    // handle file upload
-                    if v.starts_with('@') {
-                        let file_path = v.trim_start_matches('@');
-                        form = form.part(
-                            part_name,
-                            Part::bytes(fs::read(file_path)?).file_name(file_path.to_string()),
-                        );
-                        continue;
+
+        if let Some(body) = body.as_ref() {
+            let is_url_encoded = body.url_encoded;
+            let is_form_data = body.form_data;
+            let b = &body.body;
+            builder = match (is_url_encoded, is_form_data) {
+                (true, true) => panic!("Cannot have both url encoded and form data"),
+                (false, false) => builder.body(b.clone()),
+                (true, false) => builder.form(&serde_json::from_str::<HashMap<String, String>>(b)?),
+                (false, true) => {
+                    let mut form = Form::new();
+                    for (part_name, v) in serde_json::from_str::<HashMap<String, String>>(b)? {
+                        // handle file upload
+                        if v.starts_with('@') {
+                            let file_path = v.trim_start_matches('@');
+                            form = form.part(
+                                part_name,
+                                Part::bytes(fs::read(file_path)?).file_name(file_path.to_string()),
+                            );
+                            continue;
+                        }
+                        form = form.text(part_name, v);
                     }
-                    form = form.text(part_name, v);
+                    builder.multipart(form)
                 }
-                builder.multipart(form)
             }
         };
         // launching request
@@ -148,8 +144,6 @@ impl Api {
             duration,
         };
 
-        //println!("{:?}", fetch_result);
-        // return results
         Ok(fetch_result)
     }
 }

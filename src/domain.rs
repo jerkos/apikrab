@@ -9,7 +9,7 @@ use crate::{
         _http_result::HttpResult,
         _printer::Printer,
         _progress_bar::{add_progress_bar_for_request, finish_progress_bar},
-        _run_helper::{get_body, get_computed_urls, get_xtracted_path, ANONYMOUS_ACTION},
+        _run_helper::{self, get_body, get_computed_urls, get_xtracted_path, ANONYMOUS_ACTION},
         _test_checker::{TestChecker, UnaryTestResult},
         action::R,
     },
@@ -39,12 +39,31 @@ pub fn get_action_name(action: Option<&Action>) -> &str {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct Body {
+    pub(crate) body: String,
+    pub(crate) url_encoded: bool,
+    pub(crate) form_data: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct DomainActions {
+    pub(crate) actions: Vec<DomainAction>,
+}
+
+impl From<Vec<DomainAction>> for DomainActions {
+    fn from(actions: Vec<DomainAction>) -> Self {
+        DomainActions { actions }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct DomainAction {
     pub(crate) verb: String,
     pub(crate) headers: Option<HashMap<String, String>>,
-    pub(crate) urls: HashSet<String>,
-    pub(crate) query_params: Vec<Option<HashMap<String, String>>>,
-    pub(crate) body: (Option<String>, bool, bool),
+    pub(crate) url: String,
+    pub(crate) path_params: Option<Vec<HashMap<String, String>>>,
+    pub(crate) query_params: Option<Vec<HashMap<String, String>>>,
+    pub(crate) body: Option<Body>,
     pub(crate) extract_path: Option<HashMap<String, Option<String>>>,
     pub(crate) expect: Option<HashMap<String, String>>,
 }
@@ -77,17 +96,22 @@ impl DomainAction {
                 self.verb.clone()
             },
             headers: other.headers.clone().or(self.headers.clone()),
-            urls: if other.urls.is_empty() {
-                self.urls.clone()
+            url: if !other.url.is_empty() {
+                other.url.clone()
             } else {
-                other.urls.clone()
+                self.url.clone()
             },
-            query_params: if !other.query_params.is_empty() && other.query_params[0].is_some() {
+            path_params: if other.path_params.is_some() {
+                other.path_params.clone()
+            } else {
+                self.path_params.clone()
+            },
+            query_params: if other.query_params.is_some() {
                 other.query_params.clone()
             } else {
                 self.query_params.clone()
             },
-            body: if other.body.0.is_some() {
+            body: if other.body.is_some() {
                 other.body.clone()
             } else {
                 self.body.clone()
@@ -109,15 +133,15 @@ impl DomainAction {
     /// };
     /// assert!(action.can_be_run());
     /// ```
-    pub fn can_be_run(&self) -> bool {
+    pub fn can_be_run(&self, urls: &HashSet<String>) -> bool {
         let mut can_be_ran = true;
-        if let Some(url) = self.urls.iter().next() {
+        if let Some(url) = urls.iter().next() {
             if contains_interpolation(url, Interpol::SimpleInterpol) {
                 can_be_ran = false;
             }
         }
-        if let Some(ref body) = self.body.0 {
-            if contains_interpolation(body, Interpol::MultiInterpol) {
+        if let Some(ref body) = self.body {
+            if contains_interpolation(&body.body, Interpol::MultiInterpol) {
                 can_be_ran = false;
             }
         }
@@ -126,16 +150,14 @@ impl DomainAction {
                 can_be_ran = false;
             }
         }
-        if self
-            .query_params
-            .iter()
-            .filter_map(|opt| {
-                opt.as_ref()
-                    .map(|vv| map_contains_interpolation(vv, Interpol::MultiInterpol))
-            })
-            .any(|v| v)
-        {
-            can_be_ran = false
+        if let Some(ref query_params) = self.query_params {
+            if query_params
+                .iter()
+                .map(|m| map_contains_interpolation(m, Interpol::MultiInterpol))
+                .any(|v| v)
+            {
+                can_be_ran = false
+            }
         }
         can_be_ran
     }
@@ -154,9 +176,8 @@ impl DomainAction {
             url: computed_url.to_string(),
             body: self
                 .body
-                .0
                 .as_ref()
-                .map(|s| serde_json::from_str(s).unwrap()),
+                .map(|s| serde_json::from_str(&s.body).unwrap()),
             headers: Some(serde_json::to_string(&self.headers).unwrap()),
             response: f.map(|r| r.response.clone()).ok(),
             status_code: f.map(|r| r.status).unwrap_or(0u16),
@@ -178,9 +199,8 @@ impl DomainAction {
                     action.response_example = serde_json::from_str(response).ok();
                     action.body_example = self
                         .body
-                        .0
                         .as_ref()
-                        .and_then(|s| serde_json::from_str(s).ok());
+                        .and_then(|s| serde_json::from_str(&s.body).ok());
                     return db.upsert_action(action).await;
                 }
                 Ok(())
@@ -215,17 +235,21 @@ impl DomainAction {
         DomainAction {
             verb: verb.to_string(),
             headers: get_str_as_interpolated_map(header, ctx, Interpol::MultiInterpol),
-            urls: get_computed_urls(
-                path_params,
+            url: _run_helper::get_full_url(
                 project.as_ref().map(|p| p.main_url.as_str()),
                 run_action_args_url,
+            )
+            .into_owned(),
+            path_params: parse_multiple_conf_as_opt_with_grouping_and_interpolation(
+                path_params,
                 ctx,
+                Interpol::MultiInterpol,
             ),
-            body: (
-                get_body(body.0, ctx).map(|b| b.into_owned()),
-                body.1,
-                body.2,
-            ),
+            body: get_body(body.0, ctx).map(|b| b.into_owned()).map(|b| Body {
+                body: b,
+                url_encoded: body.1,
+                form_data: body.2,
+            }),
             query_params: parse_multiple_conf_as_opt_with_grouping_and_interpolation(
                 query_params,
                 ctx,
@@ -250,7 +274,7 @@ impl DomainAction {
             &self.verb,
             self.headers.as_ref().unwrap_or(&HashMap::new()),
             query_params,
-            self.body.0.as_ref().map(Cow::from),
+            self.body.as_ref().map(|b| &b.body).map(Cow::from),
         );
         if pyrequest.is_err() {
             println!("Error running python script: {:?}", pyrequest);
@@ -270,7 +294,7 @@ impl DomainAction {
         main_pb: &ProgressBar,
     ) -> (Vec<R>, Vec<Vec<UnaryTestResult>>) {
         let fetch_results = self
-            .run(action_opt, db, http, multi_progress)
+            .run(action_opt, db, http, printer, multi_progress)
             .await
             .into_iter()
             .map(|(url, result)| {
@@ -294,7 +318,7 @@ impl DomainAction {
                 fetch_results: &fetch_results,
                 ctx,
                 expected,
-                printer
+                printer,
             }
             .check(get_action_name(action_opt), main_pb);
             return (fetch_results, test_results);
@@ -308,15 +332,32 @@ impl DomainAction {
         action_opt: Option<&Action>,
         db: &dyn Db,
         http: &Api,
+        printer: &Printer,
         multi_progress: &MultiProgress,
     ) -> Vec<(String, anyhow::Result<http::FetchResult>)> {
-        future::join_all(self.urls.iter().cartesian_product(&self.query_params).map(
+        let computed_urls = get_computed_urls(self.path_params.as_ref(), &self.url);
+
+        // check if it can be run
+        if !self.can_be_run(&computed_urls) {
+            printer.p_info(|| println!("Action cannot be run due to missing information"));
+            return vec![(
+                self.url.clone(),
+                Err(anyhow::anyhow!(
+                    "Action cannot be run due to missing information"
+                )),
+            )];
+        }
+
+        // wrapping up query params
+        let qp = match self.query_params.as_ref() {
+            Some(query_params) => query_params.iter().map(Some).collect::<Vec<_>>(),
+            None => vec![None],
+        };
+        future::join_all(computed_urls.iter().cartesian_product(&qp).map(
             |(computed_url, query_params)| {
                 let action_cloned = action_opt.cloned();
 
-                let scripted_request = self
-                    .run_hook(r#""#, computed_url, query_params.as_ref())
-                    .unwrap();
+                let scripted_request = self.run_hook(r#""#, computed_url, *query_params).unwrap();
 
                 // add a progress bar
                 let pb = add_progress_bar_for_request(
@@ -337,11 +378,11 @@ impl DomainAction {
                             &scripted_request.verb,
                             &scripted_request.headers,
                             scripted_request.query_params.as_ref(),
-                            (
-                                scripted_request.body.as_ref().map(Cow::from),
-                                self.body.1,
-                                self.body.2,
-                            ),
+                            scripted_request.body.as_ref().map(|b| Body {
+                                body: b.clone(),
+                                url_encoded: self.body.as_ref().unwrap().url_encoded,
+                                form_data: self.body.as_ref().unwrap().form_data,
+                            }),
                         )
                         .await;
                     // save history line, let it silent if it fails
@@ -366,13 +407,10 @@ impl DomainAction {
                     finish_progress_bar(
                         &pb,
                         fetch_result.as_ref(),
-                        &format_query(&self.verb, computed_url, query_params.as_ref()),
+                        &format_query(&self.verb, computed_url, *query_params),
                     );
                     // returning mixed of result etc...
-                    (
-                        get_full_url(computed_url, query_params.as_ref()),
-                        fetch_result,
-                    )
+                    (get_full_url(computed_url, *query_params), fetch_result)
                 }
             },
         ))

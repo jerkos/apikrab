@@ -47,6 +47,7 @@ impl Viewport {
 pub struct Renderer<'a> {
     pub(crate) text_area: &'a TextArea<'a>,
     pub(crate) viewport: &'a Viewport,
+    pub(crate) extension: &'a str,
 }
 
 impl<'a> Renderer<'a> {
@@ -59,7 +60,9 @@ impl<'a> Renderer<'a> {
 
         let ps = SyntaxSet::load_defaults_newlines();
         let ts = ThemeSet::load_defaults();
-        let syntax = ps.find_syntax_by_extension("json").unwrap();
+        let syntax = ps
+            .find_syntax_by_extension(self.extension)
+            .unwrap_or_else(|| ps.find_syntax_plain_text());
         let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
         let mut i = top_row;
         for line in &self.text_area.get_text_area().lines()[top_row..bottom_row] {
