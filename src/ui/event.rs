@@ -17,7 +17,7 @@ pub struct EventHandler {
 
 impl EventHandler {
     pub fn new() -> Self {
-        let tick_delay = std::time::Duration::from_millis(16);
+        let tick_delay = std::time::Duration::from_millis(32);
 
         let (tx, rx) = mpsc::unbounded_channel();
         let _tx = tx.clone();
@@ -31,20 +31,18 @@ impl EventHandler {
                 tokio::select! {
                   maybe_event = crossterm_event => {
                     match maybe_event {
-                      Some(Ok(evt)) => {
-                        match evt {
-                          crossterm::event::Event::Key(key) => {
+                      Some(Ok(crossterm::event::Event::Key(key))) => {
+
                             if key.kind == crossterm::event::KeyEventKind::Press {
                               _tx.send(Event::Key(key)).unwrap();
                             }
-                          },
-                          _ => {},
-                        }
+
                       }
                       Some(Err(_)) => {
                         _tx.send(Event::Error).unwrap();
                       }
                       None => {},
+                      _ => {}
                     }
                   },
                   _ = tick_delay => {
@@ -65,5 +63,11 @@ impl EventHandler {
             .recv()
             .await
             .ok_or(anyhow::anyhow!("Event stream has been dropped"))
+    }
+}
+
+impl Drop for EventHandler {
+    fn drop(&mut self) {
+        self.task.take().unwrap().abort();
     }
 }

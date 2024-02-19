@@ -293,7 +293,7 @@ impl DomainAction {
         multi_progress: &MultiProgress,
         main_pb: &ProgressBar,
     ) -> (Vec<R>, Vec<Vec<UnaryTestResult>>) {
-        let fetch_results = self
+        let mut fetch_results = self
             .run(action_opt, db, http, printer, multi_progress)
             .await
             .into_iter()
@@ -315,7 +315,7 @@ impl DomainAction {
 
         if let Some(ref expected) = self.expect {
             let test_results = TestChecker {
-                fetch_results: &fetch_results,
+                fetch_results: &mut fetch_results,
                 ctx,
                 expected,
                 printer,

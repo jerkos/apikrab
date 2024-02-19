@@ -82,7 +82,7 @@ impl<'a> Renderer<'a> {
         let syntax = match self.extension {
             "json" => &*JSON_SYNTAX,
             "toml" => &*TOML_SYNTAX,
-            _ => &*SYNTAX_SET.find_syntax_plain_text(),
+            _ => SYNTAX_SET.find_syntax_plain_text(),
         };
 
         let mut h = HighlightLines::new(syntax, &THEME);

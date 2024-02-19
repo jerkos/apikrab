@@ -95,7 +95,32 @@ pub struct RunAction<'a> {
     pub changed_content_not_saved: bool,
 }
 
-impl RunAction<'_> {
+impl<'a> RunAction<'a> {
+    pub fn new(
+        edit_extension: String,
+        edit_text_area: TextArea<'a>,
+        response_body_text_area: TextArea<'a>,
+        response_headers_text_area: TextArea<'a>,
+    ) -> RunAction<'a> {
+        Self {
+            edit_text_area,
+            response_body_text_area,
+            response_headers_text_area,
+            action_name: None,
+            project_name: None,
+            active_text_area: ActiveTextArea::default(),
+            edit_extension,
+            edit_text_area_viewport: custom_renderer::Viewport::default(),
+            response_body_text_area_viewport: custom_renderer::Viewport::default(),
+            response_headers_text_area_viewport: custom_renderer::Viewport::default(),
+            status: RunStatus::default(),
+            test_status: TestStatus::default(),
+            test_results: None,
+            fetch_result: None,
+            changed_content_not_saved: false,
+        }
+    }
+
     pub fn reset_response_with_status(&mut self, status: RunStatus) {
         self.response_body_text_area.clear_text_area();
         self.response_headers_text_area.clear_text_area();
@@ -335,7 +360,7 @@ impl RunAction<'_> {
                         Style::default().fg(Color::Red).bold(),
                     ),
                 ]),
-                Line::from(vec![Span::raw("\nProject: ")]),
+                Line::from(vec![Span::raw("Project: ")]),
             ])
             .alignment(Alignment::Left)
             .block(Block::new().padding(Padding::new(2, 0, 1, 1)))
@@ -475,7 +500,6 @@ impl Component for RunAction<'_> {
         };
 
         frame.render_widget(edit_text_area_renderer, editor_area[0]);
-        //frame.render_widget(self.edit_text_area.get_text_area().widget(), editor_area[0]);
 
         let result_area = Layout::default()
             .direction(layout::Direction::Vertical)
@@ -499,11 +523,7 @@ impl Component for RunAction<'_> {
             extension: "json",
         };
 
-        frame.render_widget(
-            //self.response_body_text_area.get_text_area().widget(),
-            response_body_text_area_renderer,
-            result_text_area[0], //result_text_area[0],
-        ); //response_body_text_area_renderer, result_text_area[0]);
+        frame.render_widget(response_body_text_area_renderer, result_text_area[0]);
 
         let response_headers_text_area_renderer = Renderer {
             text_area: &self.response_headers_text_area,
@@ -512,10 +532,6 @@ impl Component for RunAction<'_> {
         };
 
         frame.render_widget(response_headers_text_area_renderer, result_text_area[1]);
-        //frame.render_widget(
-        //    self.response_headers_text_area.get_text_area().widget(),
-        //    result_text_area[1],
-        //);
 
         frame.render_widget(self.test_results(), result_area[1]);
 

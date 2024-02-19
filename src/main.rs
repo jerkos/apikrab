@@ -24,7 +24,7 @@ use http::Verb;
 use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
 use sqlx::{Column, Executor, Row};
-use ui::run_ui::{self, run};
+use ui::run_ui::run;
 
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};

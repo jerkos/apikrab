@@ -48,7 +48,15 @@ impl<'a> Component for ProjectList<'a> {
         )
         .block(
             Block::default()
-                .title("Projects".gray())
+                .title(vec![
+                    "Projects".gray(),
+                    " (".green(),
+                    "↑↓".green(),
+                    ")".green(),
+                    " (".green(),
+                    "→".green(),
+                    ")".green(),
+                ])
                 .style(Style::reset())
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(highlight_if_needed(

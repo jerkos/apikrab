@@ -20,9 +20,7 @@ use super::components::action_text_areas::{
     text_area, ActionTextAreas, DisplayFromAction, Examples,
 };
 use super::components::project_list::ProjectList;
-use super::components::run_action::{RunAction, RunStatus, TestStatus};
-use super::components::status_bar::status_bar;
-use super::custom_renderer;
+use super::components::run_action::{RunAction, RunStatus};
 use super::event::Event;
 use super::helpers::Component;
 use lazy_static::lazy_static;
@@ -86,23 +84,19 @@ impl<'a> App<'a> {
             action_text_areas: ActionTextAreas::new("Body", "Response", &EXAMPLE),
             // todo create a new function to init run action pane
             // with sane default
-            run_action_pane: RunAction {
-                active_text_area: Default::default(),
-                edit_extension: extension,
-                edit_text_area: text_area("Edit"),
-                edit_text_area_viewport: custom_renderer::Viewport::default(),
-                response_body_text_area: text_area("Response body"),
-                response_body_text_area_viewport: custom_renderer::Viewport::default(),
-                response_headers_text_area: text_area("Headers"),
-                response_headers_text_area_viewport: custom_renderer::Viewport::default(),
-                action_name: None,
-                project_name: None,
-                status: RunStatus::Idle,
-                test_status: TestStatus::NotRun,
-                test_results: None,
-                fetch_result: None,
-                changed_content_not_saved: false,
-            },
+            run_action_pane: RunAction::new(
+                extension,
+                text_area(vec![
+                    "Edit".bold(),
+                    " Ctlr+A".green(),
+                    " Ctlr-S".green(),
+                    "(Save)".bold(),
+                    " Ctlr+R".green(),
+                    "(Run)".bold(),
+                ]),
+                text_area(vec!["Response body".bold(), " Ctlr+B".green()]),
+                text_area(vec!["Headers".bold(), " Ctlr+H".green()]),
+            ),
             current_action: None,
             action_has_changed: false,
             tx,
@@ -193,7 +187,7 @@ impl<'a> App<'a> {
                     .await;
                 results.push(r);
             }
-            tx.send(Message::RunResult(results)).await.unwrap();
+            let _ = tx.send(Message::RunResult(results)).await;
         });
     }
 
@@ -206,14 +200,7 @@ impl<'a> App<'a> {
 
     /// build the UI
     pub fn build_ui(&mut self, frame: &mut Frame) -> io::Result<()> {
-        let all = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(vec![
-                Percentage(98),
-                Percentage(2), // examples
-            ])
-            .split(frame.size());
-
+        // run action frame
         if self.active_area == ActiveArea::RunAction {
             if self.current_action.is_none() {
                 return Ok(());
@@ -221,20 +208,17 @@ impl<'a> App<'a> {
             <RunAction as Component>::render(
                 &mut self.run_action_pane,
                 frame,
-                all[0],
+                frame.size(),
                 self.active_area,
             )?;
-
             return Ok(());
         }
 
-        // render status bar
-        frame.render_widget(status_bar(self.active_area), all[1]);
-
+        // other frames
         let main_layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(vec![Percentage(30), Percentage(70), Min(0)])
-            .split(all[0]);
+            .split(frame.size());
 
         // rendering projects
         let mut project_list = ProjectList {
@@ -257,20 +241,19 @@ impl<'a> App<'a> {
         action_list.render(frame, right_layout[0], self.active_area)?;
 
         // updating text areas props
-
         if let Some(action) = &self.current_action {
             if self.action_has_changed {
-                //self.action_text_areas.action = Some(action.clone());
-                //self.action_text_areas.clear_text_areas = true;
-                //self.action_text_areas
-                //    .render(frame, right_layout[1], self.active_area)?;
+                self.action_text_areas.action = Some(action.clone());
+                self.action_text_areas.clear_text_areas = true;
+                self.action_text_areas
+                    .render(frame, right_layout[1], self.active_area)?;
                 self.action_has_changed = false;
 
                 self.run_action_pane
                     .on_new_action(action.clone(), self.db.get_serializer());
             } else {
-                //self.action_text_areas
-                //    .render(frame, right_layout[1], self.active_area)?;
+                self.action_text_areas
+                    .render(frame, right_layout[1], self.active_area)?;
             }
         }
 
@@ -361,6 +344,7 @@ impl<'a> App<'a> {
 
     pub fn ui(&mut self, f: &mut Frame) {
         if let Ok(message) = self.rx.try_recv() {
+            // handling messages checking the channel at each render
             match message {
                 Message::ActionSaved(action) => self.action_saved(action),
                 Message::RunResult(r) => self.run_action_pane.on_run_action_result(r),

@@ -10,7 +10,7 @@ use crate::{
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders},
+    widgets::{block::Title, Block, Borders},
 };
 
 #[derive(Clone)]
@@ -52,7 +52,10 @@ impl<'a> TextArea<'a> {
     }
 }
 
-pub fn text_area(name: &str) -> TextArea<'_> {
+pub fn text_area<'a, T>(name: T) -> TextArea<'a>
+where
+    T: Into<Title<'a>>,
+{
     let mut tui_text_area = tui_textarea::TextArea::default();
     tui_text_area.set_line_number_style(Style::default().bg(Color::DarkGray));
     tui_text_area.set_block(

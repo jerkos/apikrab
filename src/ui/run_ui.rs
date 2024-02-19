@@ -9,10 +9,7 @@ use std::io;
 
 use crate::db::{db_trait::Db, dto::Project};
 
-use super::{
-    app::App,
-    event::{Event, EventHandler},
-};
+use super::{app::App, event::EventHandler};
 
 pub trait StatefulTable {
     fn items_len(&self) -> usize;

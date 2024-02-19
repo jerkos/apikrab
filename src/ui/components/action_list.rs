@@ -112,7 +112,15 @@ impl<'a> Component for ActionList<'a> {
         )
         .block(
             Block::default()
-                .title("Actions".gray())
+                .title(vec![
+                    "Actions".gray(),
+                    " (".green(),
+                    "↑↓".green(),
+                    ")".green(),
+                    " (".green(),
+                    "←".green(),
+                    ")".green(),
+                ])
                 .style(Style::reset())
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(highlight_if_needed(

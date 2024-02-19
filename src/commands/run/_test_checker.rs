@@ -1,5 +1,6 @@
 use crate::commands::run::action::R;
 use crate::http::FetchResult;
+use crate::json_path;
 use assert_json_diff::{assert_json_eq, assert_json_include};
 use crossterm::style::Stylize;
 use indicatif::ProgressBar;
@@ -71,6 +72,7 @@ impl UnaryTestResult {
 
 #[derive(Debug)]
 pub enum TestFn {
+    JsonPath(String),
     StatusCode,
     JsonInclude(String),
     JsonEq(String),
@@ -101,6 +103,8 @@ impl FromStr for TestFn {
             TestFn::Email(regex::Regex::new(
                 r"^([a-z0-9_+]([a-z0-9_+.]*[a-z0-9_+])?)@([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6})",
             )?)
+        } else if s.starts_with("$") {
+            TestFn::JsonPath(s.to_string())
         } else {
             TestFn::NoMatch
         })
@@ -226,6 +230,29 @@ impl<'a> TestChecker<'a> {
                             return UnaryTestResult::fail(message, value, &status_code);
                         }
                         UnaryTestResult::success(message)
+                    }
+                    Ok(TestFn::JsonPath(path)) => {
+                        let extracted = json_path::json_path(&result.response, path.as_str());
+                        match extracted {
+                            Some(extracted) => {
+                                let mut extracted_as_str =
+                                    serde_json::to_string(&extracted).unwrap();
+                                // hack to remove quotes from string
+                                extracted_as_str = extracted_as_str
+                                    .trim_start_matches("\"")
+                                    .trim_end_matches("\"")
+                                    .to_owned();
+                                // another one to insert into ctx
+                                let uuid = uuid::Uuid::new_v4().to_string();
+                                let mut _ctx = ctx.clone();
+                                _ctx.insert(uuid.clone(), extracted_as_str.clone());
+                                self.default_check(message, &uuid, value, &_ctx, pb)
+                            }
+                            None => {
+                                self.print_err(path.as_str(), "<empty str>", value, pb);
+                                UnaryTestResult::fail(message, value, "<empty str>")
+                            }
+                        }
                     }
                     Ok(TestFn::NoMatch) => match TestFn::from_str(value) {
                         Ok(TestFn::JsonInclude(json_to_test)) => {
