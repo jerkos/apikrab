@@ -1,11 +1,11 @@
 use std::io;
 
 use super::app::ActiveArea;
-use ratatui::{backend::Backend, layout::Rect, style::Color, widgets::ListState, Frame};
+use ratatui::{layout::Rect, style::Color, widgets::ListState, Frame};
 use serde_json::Value;
 
 pub trait Component {
-    fn render<B: Backend>(
+    fn render(
         &mut self,
         frame: &mut Frame,
         area: Rect,

@@ -3,21 +3,42 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use lazy_static::lazy_static;
 use ratatui::{
     prelude::*,
     widgets::{Paragraph, Widget},
 };
-use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{FontStyle, Theme, ThemeSet},
+    parsing::{SyntaxReference, SyntaxSet},
+};
 
 use super::{components::action_text_areas::TextArea, syntect_tui::into_span};
 
+#[inline]
 pub fn spaces(size: u8) -> &'static str {
     const SPACES: &str = "                                                                                                                                                                                                                                                                ";
     &SPACES[..size as usize]
 }
 
+#[inline]
 pub fn num_digits(i: usize) -> u8 {
     f64::log10(i as f64) as u8 + 1
+}
+
+lazy_static! {
+    pub static ref SYNTAX_SET: SyntaxSet = SyntaxSet::load_defaults_newlines();
+    pub static ref THEME_SET: ThemeSet = ThemeSet::load_defaults();
+    pub static ref TOML_SYNTAX: SyntaxReference = SYNTAX_SET
+        .find_syntax_by_extension("toml")
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text())
+        .clone();
+    pub static ref JSON_SYNTAX: SyntaxReference = SYNTAX_SET
+        .find_syntax_by_extension("json")
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text())
+        .clone();
+    pub static ref THEME: Theme = THEME_SET.themes["base16-ocean.dark"].clone();
 }
 
 #[derive(Default, Debug)]
@@ -58,18 +79,22 @@ impl<'a> Renderer<'a> {
         let bottom_row = cmp::min(top_row + height, lines_len);
         let mut lines = Vec::with_capacity(bottom_row - top_row);
 
-        let ps = SyntaxSet::load_defaults_newlines();
-        let ts = ThemeSet::load_defaults();
-        let syntax = ps
-            .find_syntax_by_extension(self.extension)
-            .unwrap_or_else(|| ps.find_syntax_plain_text());
-        let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
+        let syntax = match self.extension {
+            "json" => &*JSON_SYNTAX,
+            "toml" => &*TOML_SYNTAX,
+            _ => &*SYNTAX_SET.find_syntax_plain_text(),
+        };
+
+        let mut h = HighlightLines::new(syntax, &THEME);
         let mut i = top_row;
-        for line in &self.text_area.get_text_area().lines()[top_row..bottom_row] {
+
+        let text_area = self.text_area.get_text_area();
+
+        for line in &text_area.lines()[top_row..bottom_row] {
             // not cursor line
-            if i != self.text_area.get_text_area().cursor().0 {
+            if i != text_area.cursor().0 {
                 let mut spans = h
-                    .highlight_line(line, &ps)
+                    .highlight_line(line, &SYNTAX_SET)
                     .unwrap()
                     .into_iter()
                     .filter_map(|segment| into_span(segment).ok())
@@ -79,10 +104,7 @@ impl<'a> Renderer<'a> {
                     0,
                     Span::styled(
                         format!("{}{} ", pad, i + 1),
-                        self.text_area
-                            .get_text_area()
-                            .line_number_style()
-                            .unwrap_or_default(),
+                        text_area.line_number_style().unwrap_or_default(),
                     ),
                 );
                 lines.push(Line::from(spans));
@@ -97,42 +119,38 @@ impl<'a> Renderer<'a> {
                 0,
                 Span::styled(
                     format!("{}{} ", pad, i + 1),
-                    self.text_area
-                        .get_text_area()
-                        .line_number_style()
-                        .unwrap_or_default(),
+                    text_area.line_number_style().unwrap_or_default(),
                 ),
             );
             let mut char_count = 0;
             let mut cursor_set = false;
-            for (style, v) in h.highlight_line(line, &ps).unwrap().into_iter() {
+            for (mut style, v) in h.highlight_line(line, &SYNTAX_SET).unwrap().into_iter() {
                 if v.is_empty() {
                     continue;
                 }
+                // set font style to underline
+                style.font_style = FontStyle::UNDERLINE;
+
                 let current_char_count = char_count;
                 char_count += v.chars().count();
                 // do not need to split the current span
-                if char_count < self.text_area.get_text_area().cursor().1 || cursor_set {
+                if char_count < text_area.cursor().1 || cursor_set {
                     spans.push(into_span((style, v)).unwrap());
                     continue;
+                }
+                let cursor_pos = if current_char_count <= text_area.cursor().1 {
+                    text_area.cursor().1 - current_char_count
                 } else {
-                    //println!("cursor: {},  current_char_count: {}", cursor.1, current_char_count);
-
-                    let cursor_pos =
-                        if current_char_count <= self.text_area.get_text_area().cursor().1 {
-                            self.text_area.get_text_area().cursor().1 - current_char_count
-                        } else {
-                            0
-                        };
-                    spans.push(into_span((style, v.get(0..cursor_pos).unwrap_or(v))).unwrap());
-                    if cursor_pos < v.len() {
-                        spans.push(Span::styled(
-                            v.get(cursor_pos..cursor_pos + 1).unwrap_or(v),
-                            Style::default().add_modifier(Modifier::REVERSED),
-                        ));
-                        spans.push(into_span((style, &v[cursor_pos + 1..])).unwrap());
-                        cursor_set = true;
-                    }
+                    0
+                };
+                spans.push(into_span((style, v.get(0..cursor_pos).unwrap_or(v))).unwrap());
+                if cursor_pos < v.len() {
+                    spans.push(Span::styled(
+                        v.get(cursor_pos..cursor_pos + 1).unwrap_or(v),
+                        Style::default().add_modifier(Modifier::REVERSED),
+                    ));
+                    spans.push(into_span((style, &v[cursor_pos + 1..])).unwrap());
+                    cursor_set = true;
                 }
             }
             if !cursor_set {

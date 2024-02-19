@@ -1,13 +1,18 @@
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::backend::Backend;
 use ratatui::prelude::CrosstermBackend;
 use ratatui::widgets::TableState;
-use ratatui::{Frame, Terminal};
+use ratatui::Terminal;
 use std::io;
+
+use crate::db::{db_trait::Db, dto::Project};
+
+use super::{
+    app::App,
+    event::{Event, EventHandler},
+};
 
 pub trait StatefulTable {
     fn items_len(&self) -> usize;
@@ -41,64 +46,39 @@ pub trait StatefulTable {
     }
 }
 
-pub trait UIRunner {
-    // default function for handling event
-    fn handle_event(&mut self) -> io::Result<bool> {
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                if let KeyCode::Char('q') = key.code {
-                    return Ok(true);
-                }
-            }
+// main entry point to enter in ui mode
+pub async fn run(projects: Vec<Project>, db: Box<dyn Db>) -> anyhow::Result<()> {
+    // setup terminal
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    enable_raw_mode()?;
+    execute!(stdout, EnterAlternateScreen)?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut event_handler = EventHandler::new();
+    // create app and run it
+    // application state
+    let mut app = App::new(projects, db);
+    // let res = run_app(&mut terminal, event_handler).await;
+
+    loop {
+        let event = event_handler.next().await?;
+        let should_quit = app.handle_event(&event)?;
+        if should_quit {
+            break;
         }
-        Ok(false)
+        terminal.draw(|f| app.ui(f))?;
+
+        //terminal.draw(|f| app.ui(f))?;
     }
 
-    fn init(&mut self) {}
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen,)?;
+    terminal.show_cursor()?;
 
-    // render method for the UI
-    fn ui<B: Backend>(&mut self, f: &mut Frame);
-
-    // main entry point to enter in ui mode
-    fn run_ui(&mut self) -> anyhow::Result<()> {
-        // setup terminal
-        let stdout = io::stdout();
-        let mut stdout = stdout.lock();
-
-        enable_raw_mode()?;
-        execute!(stdout, EnterAlternateScreen)?;
-
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
-
-        // create app and run it
-        let res = self.run_app(&mut terminal);
-
-        // restore terminal
-        disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            LeaveAlternateScreen,
-        )?;
-        terminal.show_cursor()?;
-
-        if let Err(err) = res {
-            println!("{err:?}");
-        }
-
-        Ok(())
-    }
-
-    fn run_app<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
-        self.init();
-
-        loop {
-            terminal.draw(|f| self.ui::<B>(f))?;
-
-            let should_quit = self.handle_event()?;
-            if should_quit {
-                return Ok(());
-            }
-        }
-    }
+    Ok(())
 }

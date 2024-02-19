@@ -1,5 +1,4 @@
 pub(crate) mod list;
-pub(crate) mod list_ui;
 
 use clap::{Args, Subcommand};
 
@@ -15,6 +14,4 @@ pub struct History {
 pub enum HistoryCommands {
     /// Show history
     List(HistoryArgs),
-    /// Run history ui
-    Ui,
 }

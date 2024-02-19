@@ -20,7 +20,7 @@ pub struct ProjectList<'a> {
 }
 
 impl<'a> Component for ProjectList<'a> {
-    fn render<B: ratatui::prelude::Backend>(
+    fn render(
         &mut self,
         frame: &mut ratatui::prelude::Frame,
         area: Rect,

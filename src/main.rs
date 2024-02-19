@@ -24,11 +24,11 @@ use http::Verb;
 use lazy_static::lazy_static;
 use sqlx::Either::{Left, Right};
 use sqlx::{Column, Executor, Row};
+use ui::run_ui::{self, run};
 
 use crate::commands::project::{Project, ProjectCommands};
 use crate::commands::run::{Run, RunCommands};
 use crate::commands::ts::{TestSuite, TestSuiteCommands};
-use crate::ui::run_ui::UIRunner;
 
 /// File system serializer
 #[derive(Debug, Default, Clone)]
@@ -183,19 +183,13 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Commands::History(history) => match &mut history.history_commands {
-            HistoryCommands::Ui => {
-                let histories = db_handler.get_history(None).await?;
-                let mut ui = commands::history::list_ui::HistoryUI::new(histories);
-                ui.run_ui()?;
-            }
             HistoryCommands::List(list_args) => {
                 list_args.list_history(db_handler).await?;
             }
         },
         Commands::Ui => {
             let projects = db_handler.get_projects().await?;
-            let mut ui = ui::app::App::new(projects, db_handler);
-            ui.run_ui()?;
+            run(projects, db_handler).await?;
         }
         &mut Commands::PrintCompleteScript { shell } => {
             generate(

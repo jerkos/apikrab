@@ -20,7 +20,7 @@ pub struct ActionList<'a> {
 }
 
 impl<'a> Component for ActionList<'a> {
-    fn render<B: ratatui::prelude::Backend>(
+    fn render(
         &mut self,
         frame: &mut ratatui::prelude::Frame,
         area: Rect,

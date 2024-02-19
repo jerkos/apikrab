@@ -434,12 +434,7 @@ impl RunAction<'_> {
 
 /// The component for running an action
 impl Component for RunAction<'_> {
-    fn render<B: Backend>(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        _: ActiveArea,
-    ) -> io::Result<()> {
+    fn render(&mut self, frame: &mut Frame, area: Rect, _: ActiveArea) -> io::Result<()> {
         self.compute_states();
 
         let layout = Layout::default()
@@ -480,6 +475,7 @@ impl Component for RunAction<'_> {
         };
 
         frame.render_widget(edit_text_area_renderer, editor_area[0]);
+        //frame.render_widget(self.edit_text_area.get_text_area().widget(), editor_area[0]);
 
         let result_area = Layout::default()
             .direction(layout::Direction::Vertical)
@@ -503,7 +499,11 @@ impl Component for RunAction<'_> {
             extension: "json",
         };
 
-        frame.render_widget(response_body_text_area_renderer, result_text_area[0]);
+        frame.render_widget(
+            //self.response_body_text_area.get_text_area().widget(),
+            response_body_text_area_renderer,
+            result_text_area[0], //result_text_area[0],
+        ); //response_body_text_area_renderer, result_text_area[0]);
 
         let response_headers_text_area_renderer = Renderer {
             text_area: &self.response_headers_text_area,
@@ -512,6 +512,10 @@ impl Component for RunAction<'_> {
         };
 
         frame.render_widget(response_headers_text_area_renderer, result_text_area[1]);
+        //frame.render_widget(
+        //    self.response_headers_text_area.get_text_area().widget(),
+        //    result_text_area[1],
+        //);
 
         frame.render_widget(self.test_results(), result_area[1]);
 

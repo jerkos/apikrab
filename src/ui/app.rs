@@ -6,15 +6,11 @@ use crate::db::db_trait::Db;
 use crate::db::dto::{Action, Project};
 use crate::http::Api;
 use crate::ui::helpers::{Stateful, StatefulList};
-use crate::ui::run_ui::UIRunner;
 use apikrab::serializer::SerDe;
-use crossterm::event::{self};
 use indicatif::ProgressDrawTarget;
-use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 use std::collections::HashMap;
-use std::time::Duration;
 use std::{io, vec};
 use tokio::sync::mpsc;
 use tui_textarea::{Input, Key};
@@ -27,6 +23,7 @@ use super::components::project_list::ProjectList;
 use super::components::run_action::{RunAction, RunStatus, TestStatus};
 use super::components::status_bar::status_bar;
 use super::custom_renderer;
+use super::event::Event;
 use super::helpers::Component;
 use lazy_static::lazy_static;
 
@@ -208,7 +205,7 @@ impl<'a> App<'a> {
     }
 
     /// build the UI
-    fn build_ui<B: Backend>(&mut self, frame: &mut Frame) -> io::Result<()> {
+    pub fn build_ui(&mut self, frame: &mut Frame) -> io::Result<()> {
         let all = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![
@@ -221,7 +218,7 @@ impl<'a> App<'a> {
             if self.current_action.is_none() {
                 return Ok(());
             }
-            <RunAction as Component>::render::<B>(
+            <RunAction as Component>::render(
                 &mut self.run_action_pane,
                 frame,
                 all[0],
@@ -243,7 +240,7 @@ impl<'a> App<'a> {
         let mut project_list = ProjectList {
             projects: &mut self.projects,
         };
-        project_list.render::<B>(frame, main_layout[0], self.active_area)?;
+        project_list.render(frame, main_layout[0], self.active_area)?;
 
         let right_layout = Layout::default()
             .direction(Direction::Vertical)
@@ -257,112 +254,112 @@ impl<'a> App<'a> {
         let mut action_list = ActionList {
             actions: &mut self.actions,
         };
-        action_list.render::<B>(frame, right_layout[0], self.active_area)?;
+        action_list.render(frame, right_layout[0], self.active_area)?;
 
         // updating text areas props
+
         if let Some(action) = &self.current_action {
             if self.action_has_changed {
-                self.action_text_areas.action = Some(action.clone());
-                self.action_text_areas.clear_text_areas = true;
-                self.action_text_areas
-                    .render(frame, right_layout[1], self.active_area)?;
+                //self.action_text_areas.action = Some(action.clone());
+                //self.action_text_areas.clear_text_areas = true;
+                //self.action_text_areas
+                //    .render(frame, right_layout[1], self.active_area)?;
                 self.action_has_changed = false;
 
                 self.run_action_pane
                     .on_new_action(action.clone(), self.db.get_serializer());
             } else {
-                self.action_text_areas
-                    .render(frame, right_layout[1], self.active_area)?;
+                //self.action_text_areas
+                //    .render(frame, right_layout[1], self.active_area)?;
             }
         }
 
         Ok(())
     }
-}
 
-impl UIRunner for App<'_> {
-    fn handle_event(&mut self) -> io::Result<bool> {
+    pub fn handle_event(&mut self, event: &Event) -> io::Result<bool> {
         // polling for an event
-        if !event::poll(Duration::from_millis(8))? {
+        if let Event::Error = event {
             return Ok(false);
         }
-
-        let ev = event::read()?.into();
-        match self.active_area {
-            ActiveArea::RunAction => self.run_action_pane.handle_event(ev, self.tx.clone()),
-            ActiveArea::ProjectPane => match ev {
-                Input { key: Key::Esc, .. } => return Ok(true),
-                Input {
-                    key: Key::Right, ..
-                } => self.active_area = ActiveArea::ActionPane,
-                Input { key: Key::Up, .. } => {
-                    self.projects.previous();
-                    self.update_displayed_actions();
-                }
-                Input { key: Key::Down, .. } => {
-                    self.projects.next();
-                    self.update_displayed_actions();
-                }
-                _ => {}
-            },
-            ActiveArea::ActionPane => match ev {
-                Input { key: Key::Esc, .. } => return Ok(true),
-                Input { key: Key::Left, .. } => self.active_area = ActiveArea::ProjectPane,
-                Input { key: Key::Up, .. } => {
-                    self.actions.previous();
-                    self.set_current_action();
-                }
-                Input { key: Key::Down, .. } => {
-                    self.actions.next();
-                    self.set_current_action();
-                }
-                Input {
-                    key: Key::Enter, ..
-                } => {
-                    if self.current_action.is_some() {
-                        self.active_area = ActiveArea::RunAction
+        if let Event::Key(key_event) = event {
+            let ev: Input = Input::from(*key_event);
+            match self.active_area {
+                ActiveArea::RunAction => self.run_action_pane.handle_event(ev, self.tx.clone()),
+                ActiveArea::ProjectPane => match ev {
+                    Input { key: Key::Esc, .. } => return Ok(true),
+                    Input {
+                        key: Key::Right, ..
+                    } => self.active_area = ActiveArea::ActionPane,
+                    Input { key: Key::Up, .. } => {
+                        self.projects.previous();
+                        self.update_displayed_actions();
                     }
-                }
-                Input {
-                    key: Key::Char('r'),
-                    ctrl: true,
-                    ..
-                } => self.active_area = ActiveArea::ResponseExample,
-
-                // go to body example widget
-                Input {
-                    key: Key::Char('b'),
-                    ctrl: true,
-                    ..
-                } => self.active_area = ActiveArea::BodyExample,
-                _ => {}
-            },
-            ActiveArea::BodyExample | ActiveArea::ResponseExample => match ev {
-                Input { key: Key::Esc, .. } => self.active_area = ActiveArea::ActionPane,
-                input => match self.active_area {
-                    ActiveArea::ResponseExample => {
-                        let _ = self
-                            .action_text_areas
-                            .right_text_area
-                            .get_text_area_mut()
-                            .input(input);
-                    }
-                    ActiveArea::BodyExample => {
-                        let _ = self
-                            .action_text_areas
-                            .left_text_area
-                            .get_text_area_mut()
-                            .input(input);
+                    Input { key: Key::Down, .. } => {
+                        self.projects.next();
+                        self.update_displayed_actions();
                     }
                     _ => {}
                 },
-            },
+                ActiveArea::ActionPane => match ev {
+                    Input { key: Key::Esc, .. } => return Ok(true),
+                    Input { key: Key::Left, .. } => self.active_area = ActiveArea::ProjectPane,
+                    Input { key: Key::Up, .. } => {
+                        self.actions.previous();
+                        self.set_current_action();
+                    }
+                    Input { key: Key::Down, .. } => {
+                        self.actions.next();
+                        self.set_current_action();
+                    }
+                    Input {
+                        key: Key::Enter, ..
+                    } => {
+                        if self.current_action.is_some() {
+                            self.active_area = ActiveArea::RunAction
+                        }
+                    }
+                    Input {
+                        key: Key::Char('r'),
+                        ctrl: true,
+                        ..
+                    } => self.active_area = ActiveArea::ResponseExample,
+
+                    // go to body example widget
+                    Input {
+                        key: Key::Char('b'),
+                        ctrl: true,
+                        ..
+                    } => self.active_area = ActiveArea::BodyExample,
+                    _ => {}
+                },
+                ActiveArea::BodyExample | ActiveArea::ResponseExample => match ev {
+                    Input { key: Key::Esc, .. } => self.active_area = ActiveArea::ActionPane,
+                    input => match self.active_area {
+                        ActiveArea::ResponseExample => {
+                            let _ = self
+                                .action_text_areas
+                                .right_text_area
+                                .get_text_area_mut()
+                                .input(input);
+                        }
+                        ActiveArea::BodyExample => {
+                            let _ = self
+                                .action_text_areas
+                                .left_text_area
+                                .get_text_area_mut()
+                                .input(input);
+                        }
+                        _ => {}
+                    },
+                },
+            }
         }
 
         Ok(false)
     }
 
-    fn ui<B: Backend>(&mut self, f: &mut Frame) {
+    pub fn ui(&mut self, f: &mut Frame) {
         if let Ok(message) = self.rx.try_recv() {
             match message {
                 Message::ActionSaved(action) => self.action_saved(action),
@@ -374,7 +371,7 @@ impl UIRunner for App<'_> {
                 Message::LeaveRunAction => self.active_area = ActiveArea::ActionPane,
             }
         }
-        let r = self.build_ui::<B>(f);
+        let r = self.build_ui(f);
         if let Err(e) = r {
             println!("Error: {}", e);
         }
