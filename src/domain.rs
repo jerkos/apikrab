@@ -66,6 +66,8 @@ pub struct DomainAction {
     pub(crate) body: Option<Body>,
     pub(crate) extract_path: Option<HashMap<String, Option<String>>>,
     pub(crate) expect: Option<HashMap<String, String>>,
+    pub(crate) insecure: bool,
+    pub(crate) timeout: u64,
 }
 
 impl DomainAction {
@@ -118,6 +120,8 @@ impl DomainAction {
             },
             extract_path: other.extract_path.clone().or(self.extract_path.clone()),
             expect: other.expect.clone().or(self.expect.clone()),
+            insecure: other.insecure,
+            timeout: other.timeout,
         }
     }
 
@@ -230,6 +234,8 @@ impl DomainAction {
         query_params: &str,
         expect: Option<&Vec<String>>,
         project: Option<&Project>,
+        insecure: bool,
+        timeout: u64,
         ctx: &HashMap<String, String>,
     ) -> DomainAction {
         DomainAction {
@@ -257,6 +263,8 @@ impl DomainAction {
             ),
             extract_path: get_xtracted_path(xtract_path, true, ctx),
             expect: parse_cli_conf_to_map(expect),
+            insecure,
+            timeout
         }
     }
 

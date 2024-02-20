@@ -330,6 +330,7 @@ impl<'a> RunAction<'a> {
         );
         Paragraph::new(test_lines)
             .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false })
             .block(
                 Block::new()
                     .title("Test results")

@@ -63,6 +63,8 @@ impl CurrentActionData<'_> {
             val_or_join(self.query_params, run_action_args.query_params.as_ref()).as_ref(),
             run_action_args.expect.as_ref(),
             project,
+            run_action_args.insecure,
+            run_action_args.timeout.unwrap_or(10),
             ctx,
         )
     }

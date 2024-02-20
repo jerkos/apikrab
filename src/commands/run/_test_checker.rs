@@ -103,7 +103,7 @@ impl FromStr for TestFn {
             TestFn::Email(regex::Regex::new(
                 r"^([a-z0-9_+]([a-z0-9_+.]*[a-z0-9_+])?)@([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6})",
             )?)
-        } else if s.starts_with("$") {
+        } else if s.starts_with('$') {
             TestFn::JsonPath(s.to_string())
         } else {
             TestFn::NoMatch
@@ -239,8 +239,8 @@ impl<'a> TestChecker<'a> {
                                     serde_json::to_string(&extracted).unwrap();
                                 // hack to remove quotes from string
                                 extracted_as_str = extracted_as_str
-                                    .trim_start_matches("\"")
-                                    .trim_end_matches("\"")
+                                    .trim_start_matches('\"')
+                                    .trim_end_matches('\"')
                                     .to_owned();
                                 // another one to insert into ctx
                                 let uuid = uuid::Uuid::new_v4().to_string();
