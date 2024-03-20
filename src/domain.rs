@@ -1,5 +1,5 @@
 use std::{
-    borrow::Cow,
+    borrow::{Borrow, Cow},
     collections::{HashMap, HashSet},
     time::Duration,
 };
@@ -18,7 +18,7 @@ use crate::{
         dto::{Action, History, Project},
     },
     http::{self, Api, FetchResult},
-    python::{run_python_pre_script, PyRequest},
+    python::{run_python_post_script, run_python_pre_script, PyRequest, Request},
     utils::{
         contains_interpolation, format_query, get_full_url, get_str_as_interpolated_map,
         map_contains_interpolation, parse_cli_conf_to_map,
@@ -56,6 +56,32 @@ impl From<Vec<DomainAction>> for DomainActions {
     }
 }
 
+impl From<&Vec<DomainAction>> for DomainActions {
+    fn from(actions: &Vec<DomainAction>) -> Self {
+        DomainActions {
+            actions: actions.to_vec(),
+        }
+    }
+}
+
+fn default_timeout() -> u64 {
+    10
+}
+
+fn default_insecure() -> bool {
+    false
+}
+
+fn default_pre_script() -> Option<String> {
+    Some(
+        r#"import sys
+sys.path.append('./venv/lib/python3.11/site-packages')
+print("hello world")
+"#
+        .to_string(),
+    )
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct DomainAction {
     pub(crate) verb: String,
@@ -66,7 +92,16 @@ pub struct DomainAction {
     pub(crate) body: Option<Body>,
     pub(crate) extract_path: Option<HashMap<String, Option<String>>>,
     pub(crate) expect: Option<HashMap<String, String>>,
+
+    #[serde(default = "default_pre_script")]
+    pub(crate) pre_script: Option<String>,
+
+    pub(crate) post_script: Option<String>,
+
+    #[serde(default = "default_insecure")]
     pub(crate) insecure: bool,
+
+    #[serde(default = "default_timeout")]
     pub(crate) timeout: u64,
 }
 
@@ -120,6 +155,8 @@ impl DomainAction {
             },
             extract_path: other.extract_path.clone().or(self.extract_path.clone()),
             expect: other.expect.clone().or(self.expect.clone()),
+            pre_script: other.pre_script.clone().or(self.pre_script.clone()),
+            post_script: other.post_script.clone().or(self.post_script.clone()),
             insecure: other.insecure,
             timeout: other.timeout,
         }
@@ -263,8 +300,10 @@ impl DomainAction {
             ),
             extract_path: get_xtracted_path(xtract_path, true, ctx),
             expect: parse_cli_conf_to_map(expect),
+            pre_script: default_pre_script(),
+            post_script: None,
             insecure,
-            timeout
+            timeout,
         }
     }
 
@@ -274,7 +313,7 @@ impl DomainAction {
         python_script: &str,
         url: &str,
         query_params: Option<&HashMap<String, String>>,
-    ) -> Result<PyRequest, PyErr> {
+    ) -> Result<(Request, String), PyErr> {
         // run prescript if any
         let pyrequest = run_python_pre_script(
             python_script,
@@ -305,7 +344,7 @@ impl DomainAction {
             .run(action_opt, db, http, printer, multi_progress)
             .await
             .into_iter()
-            .map(|(url, result)| {
+            .map(|(url, result, script_output)| {
                 // print information on screen if needed
                 let _ = HttpResult {
                     fetch_result: result.as_ref(),
@@ -316,6 +355,7 @@ impl DomainAction {
                 R {
                     url,
                     result,
+                    script_output,
                     ctx: ctx.clone(),
                 }
             })
@@ -342,7 +382,7 @@ impl DomainAction {
         http: &Api,
         printer: &Printer,
         multi_progress: &MultiProgress,
-    ) -> Vec<(String, anyhow::Result<http::FetchResult>)> {
+    ) -> Vec<(String, anyhow::Result<http::FetchResult>, String)> {
         let computed_urls = get_computed_urls(self.path_params.as_ref(), &self.url);
 
         // check if it can be run
@@ -353,6 +393,7 @@ impl DomainAction {
                 Err(anyhow::anyhow!(
                     "Action cannot be run due to missing information"
                 )),
+                "".to_string(),
             )];
         }
 
@@ -365,7 +406,13 @@ impl DomainAction {
             |(computed_url, query_params)| {
                 let action_cloned = action_opt.cloned();
 
-                let scripted_request = self.run_hook(r#""#, computed_url, *query_params).unwrap();
+                let (scripted_request, mut script_output) = self
+                    .run_hook(
+                        self.pre_script.as_ref().unwrap(),
+                        computed_url,
+                        *query_params,
+                    )
+                    .unwrap();
 
                 // add a progress bar
                 let pb = add_progress_bar_for_request(
@@ -377,7 +424,6 @@ impl DomainAction {
                     ),
                 );
                 pb.enable_steady_tick(Duration::from_millis(100));
-
                 async move {
                     // fetch api
                     let fetch_result = http
@@ -388,8 +434,12 @@ impl DomainAction {
                             scripted_request.query_params.as_ref(),
                             scripted_request.body.as_ref().map(|b| Body {
                                 body: b.clone(),
-                                url_encoded: self.body.as_ref().unwrap().url_encoded,
-                                form_data: self.body.as_ref().unwrap().form_data,
+                                url_encoded: self
+                                    .body
+                                    .as_ref()
+                                    .map(|b| b.url_encoded)
+                                    .unwrap_or(false),
+                                form_data: self.body.as_ref().map(|b| b.form_data).unwrap_or(false),
                             }),
                         )
                         .await;
@@ -412,13 +462,33 @@ impl DomainAction {
                             .await;
                     }
 
+                    // run post script if any
+                    if let Some(post_script) = &self.post_script {
+                        match fetch_result.as_ref() {
+                            Ok(result) => {
+                                let post_script_output =
+                                    run_python_post_script(post_script, result)
+                                        .unwrap_or("".to_string());
+                                script_output.push_str(&post_script_output);
+                            }
+                            Err(e) => {
+                                pb.println(format!("[ERROR] post script failed: {}", e));
+                            }
+                        }
+                    }
+
                     finish_progress_bar(
                         &pb,
                         fetch_result.as_ref(),
                         &format_query(&self.verb, computed_url, *query_params),
                     );
                     // returning mixed of result etc...
-                    (get_full_url(computed_url, *query_params), fetch_result)
+
+                    (
+                        get_full_url(computed_url, *query_params),
+                        fetch_result,
+                        script_output,
+                    )
                 }
             },
         ))

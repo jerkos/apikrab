@@ -84,8 +84,8 @@ pub struct Action {
     pub(crate) actions: Vec<DomainAction>,
 
     // metadata
-    pub(crate) body_example: Option<Value>,
-    pub(crate) response_example: Option<Value>,
+    pub(crate) body_example: Option<String>,
+    pub(crate) response_example: Option<String>,
     // foreign key
     pub(crate) project_name: Option<String>,
     // chrono

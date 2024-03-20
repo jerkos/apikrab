@@ -151,7 +151,7 @@ impl Db for FileDb {
 
     async fn rm_action(&self, action_name: &str, project: Option<&str>) -> anyhow::Result<u64> {
         let dirname = match project.as_ref() {
-            Some(p_name) => format!("{}/{}", self.get_root(), p_name),
+            Some(p_name) => format!("{}/projects/{}", self.get_root(), p_name),
             None => format!("{}/projects/default", self.get_root()),
         };
 
@@ -159,7 +159,7 @@ impl Db for FileDb {
             "{}/{}.{}",
             dirname,
             action_name,
-            self.serializer.ending() //<T as SerDe>::ending(&self.serializer)
+            self.serializer.ending()
         ))
         .await?;
         Ok(1)

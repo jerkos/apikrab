@@ -22,6 +22,7 @@ use super::_run_helper::ANONYMOUS_ACTION;
 pub struct R {
     pub url: String,
     pub result: anyhow::Result<FetchResult>,
+    pub(crate) script_output: String,
     pub ctx: HashMap<String, String>,
 }
 

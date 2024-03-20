@@ -59,17 +59,18 @@ pub async fn run(projects: Vec<Project>, db: Box<dyn Db>) -> anyhow::Result<()> 
     // create app and run it
     // application state
     let mut app = App::new(projects, db);
-    // let res = run_app(&mut terminal, event_handler).await;
 
     loop {
         let event = event_handler.next().await?;
-        let should_quit = app.handle_event(&event)?;
+        let should_quit;
+        {
+            let app_mut = &mut app;
+            should_quit = app_mut.handle_event(&event)?;
+        }
         if should_quit {
             break;
         }
         terminal.draw(|f| app.ui(f))?;
-
-        //terminal.draw(|f| app.ui(f))?;
     }
 
     // restore terminal

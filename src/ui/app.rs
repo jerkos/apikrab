@@ -17,12 +17,12 @@ use tui_textarea::{Input, Key};
 
 use super::components::action_list::ActionList;
 use super::components::action_text_areas::{
-    text_area, ActionTextAreas, DisplayFromAction, Examples,
+    text_area, ActionTextAreas, DisplayFromAction, Examples, TextArea,
 };
 use super::components::project_list::ProjectList;
 use super::components::run_action::{RunAction, RunStatus};
 use super::event::Event;
-use super::helpers::Component;
+use super::helpers::{centered_rect, Component};
 use lazy_static::lazy_static;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -30,6 +30,7 @@ pub enum ActiveArea {
     #[default]
     ProjectPane,
     ActionPane,
+    NewActionPopup,
     BodyExample,
     ResponseExample,
     // entire screen
@@ -37,13 +38,31 @@ pub enum ActiveArea {
 }
 
 #[derive(Debug)]
+pub enum Move {
+    Up,
+    Down,
+}
+
+#[derive(Debug)]
 pub enum Message {
+    SwitchArea(ActiveArea),
     RunResult(Vec<(Vec<R>, Vec<Vec<UnaryTestResult>>)>),
-    UpdateAction(Vec<Action>),
+    UpdateActions(Vec<Action>),
+    CreateAction,
     ActionSaved(Action),
+    ListMove(Move),
+    DeleteAction,
+    ActionDeleted,
     SaveAction,
     RunAction,
-    LeaveRunAction,
+    InputTextArea(Input),
+    ForwardEvent(Input),
+}
+
+fn send_message(tx: mpsc::Sender<Message>, message: Message) {
+    tokio::spawn(async move {
+        let _ = tx.send(message).await;
+    });
 }
 
 lazy_static! {
@@ -59,8 +78,8 @@ pub(crate) struct App<'a> {
     actions: StatefulList<Action>,
     action_text_areas: ActionTextAreas<'a>,
     run_action_pane: RunAction<'a>,
-    current_action: Option<Action>,
     action_has_changed: bool,
+    new_action_text_area: TextArea<'a>,
     tx: mpsc::Sender<Message>,
     rx: mpsc::Receiver<Message>,
 }
@@ -82,40 +101,138 @@ impl<'a> App<'a> {
                 items: Vec::new(),
             },
             action_text_areas: ActionTextAreas::new("Body", "Response", &EXAMPLE),
-            // todo create a new function to init run action pane
-            // with sane default
             run_action_pane: RunAction::new(
                 extension,
-                text_area(vec![
-                    "Edit".bold(),
-                    " Ctlr+A".green(),
-                    " Ctlr-S".green(),
-                    "(Save)".bold(),
-                    " Ctlr+R".green(),
-                    "(Run)".bold(),
-                ]),
-                text_area(vec!["Response body".bold(), " Ctlr+B".green()]),
-                text_area(vec!["Headers".bold(), " Ctlr+H".green()]),
+                text_area(""),
+                text_area(""),
+                text_area(""),
+                text_area(""),
+                text_area(""),
+                text_area(""),
             ),
-            current_action: None,
             action_has_changed: false,
+            new_action_text_area: text_area("New action"),
             tx,
             rx,
+        }
+    }
+
+    pub fn input_text_area(&mut self, input: Input) {
+        match self.active_area {
+            ActiveArea::BodyExample => {
+                let _ = self
+                    .action_text_areas
+                    .left_text_area
+                    .get_text_area_mut()
+                    .input(input);
+            }
+            ActiveArea::ResponseExample => {
+                let _ = self
+                    .action_text_areas
+                    .right_text_area
+                    .get_text_area_mut()
+                    .input(input);
+            }
+            ActiveArea::NewActionPopup => {
+                let _ = self.new_action_text_area.get_text_area_mut().input(input);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn list_move(&mut self, m: Move) {
+        match m {
+            Move::Up => {
+                if self.active_area == ActiveArea::ProjectPane {
+                    self.projects.previous();
+                    self.update_displayed_actions();
+                } else if self.active_area == ActiveArea::ActionPane {
+                    self.actions.previous();
+                    self.action_has_changed = true;
+                }
+            }
+            Move::Down => {
+                if self.active_area == ActiveArea::ProjectPane {
+                    self.projects.next();
+                    self.update_displayed_actions();
+                } else if self.active_area == ActiveArea::ActionPane {
+                    self.actions.next();
+                    self.action_has_changed = true;
+                }
+            }
         }
     }
 
     /// Update the actions list
     /// This function will spawn a new tokio task to fetch the actions
     fn update_displayed_actions(&mut self) {
-        let projects = self.projects.clone();
         let db = self.db.clone();
         let tx = self.tx.clone();
-
+        let active_project = &self.projects.items[self.projects.state.selected().unwrap()];
+        let project_name = active_project.name.clone();
         tokio::spawn(async move {
-            let selected_item = projects.items[projects.state.selected().unwrap()].clone();
-            let actions = db.get_actions(Some(&selected_item.name)).await.unwrap();
-            tx.send(Message::UpdateAction(actions)).await.unwrap();
+            let actions = db.get_actions(Some(&project_name)).await.unwrap();
+            tx.send(Message::UpdateActions(actions)).await.unwrap();
         });
+    }
+
+    fn forward_event(&mut self, input: Input) {
+        if let ActiveArea::RunAction = self.active_area {
+            self.run_action_pane.handle_event(input, self.tx.clone());
+        }
+    }
+
+    fn switch_area(&mut self, area: ActiveArea) {
+        self.active_area = area;
+    }
+
+    /// create new action
+    fn create_action(&mut self) {
+        let action = Action {
+            name: Some(self.new_action_text_area.get_text_content().to_string()),
+            project_name: Some(
+                self.projects.items[self.projects.state.selected().unwrap()]
+                    .name
+                    .clone(),
+            ),
+            actions: vec![],
+            created_at: Some(chrono::Local::now().naive_local()),
+            ..Default::default()
+        };
+        let action_cloned = action.clone();
+        self.actions.items.push(action);
+        let actions_len = self.actions.items.len() - 1;
+        self.run_action_pane
+            .on_new_action(&action_cloned, self.db.get_serializer());
+
+        self.active_area = ActiveArea::RunAction;
+        self.actions.state.select(Some(actions_len));
+    }
+
+    fn delete_action(&mut self) {
+        let action = self.get_current_action();
+        if let Some(action) = action {
+            let db = self.db.clone();
+            let tx = self.tx.clone();
+            let action_name_cloned = action.name.clone();
+            let project_name_cloned = action.project_name.clone();
+            tokio::spawn(async move {
+                let _ = db
+                    .rm_action(
+                        action_name_cloned.as_deref().unwrap(),
+                        project_name_cloned.as_deref(),
+                    )
+                    .await;
+                let _ = tx.send(Message::ActionDeleted).await;
+            });
+        }
+    }
+
+    fn action_deleted(&mut self) {
+        let idx = self.actions.state.selected();
+        if let Some(idx) = idx {
+            self.actions.items.remove(idx);
+        }
     }
 
     /// Save the current action
@@ -129,7 +246,7 @@ impl<'a> App<'a> {
             return;
         }
 
-        let mut action = self.current_action.as_ref().unwrap().clone();
+        let mut action = self.get_current_action().unwrap().clone();
         action.actions = domain_actions.unwrap();
 
         let db = self.db.clone();
@@ -137,15 +254,17 @@ impl<'a> App<'a> {
 
         tokio::spawn(async move {
             db.upsert_action(&action).await.unwrap();
-            tx.send(Message::ActionSaved(action)).await.unwrap();
+            tx.send(Message::ActionSaved(action.clone())).await.unwrap();
         });
     }
 
     fn action_saved(&mut self, action: Action) {
-        let items = &mut self.actions.items;
-        let selected_index = self.actions.state.selected().unwrap();
-        let _ = std::mem::replace(&mut items[selected_index], action);
-        self.run_action_pane.changed_content_not_saved = false;
+        let selected_index = self.actions.state.selected();
+        if let Some(idx) = selected_index {
+            let items = &mut self.actions.items;
+            let _ = std::mem::replace(&mut items[idx], action);
+            self.run_action_pane.changed_content_not_saved = false;
+        }
     }
 
     /// Run the current action
@@ -168,7 +287,6 @@ impl<'a> App<'a> {
         let actions = domain_actions.unwrap();
 
         // build all necessary stuff to run the action
-        let api = Api::new(Some(5), false);
         let mut ctx = HashMap::new();
         let (multi, pb) = init_progress_bars(actions.len() as u64);
         multi.set_draw_target(ProgressDrawTarget::hidden());
@@ -182,6 +300,7 @@ impl<'a> App<'a> {
         tokio::spawn(async move {
             let mut results: Vec<(Vec<R>, Vec<Vec<UnaryTestResult>>)> = vec![];
             for action in actions {
+                let api = Api::new(Some(action.timeout), action.insecure);
                 let r = action
                     .run_with_tests(None, &mut ctx, &*db, &api, &mut printer, &multi, &pb)
                     .await;
@@ -191,18 +310,18 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Set the current action
-    fn set_current_action(&mut self) {
-        self.current_action =
-            Some(self.actions.items[self.actions.state.selected().unwrap()].clone());
-        self.action_has_changed = true;
+    fn get_current_action(&self) -> Option<&Action> {
+        self.actions
+            .state
+            .selected()
+            .and_then(|idx| self.actions.items.get(idx))
     }
 
     /// build the UI
     pub fn build_ui(&mut self, frame: &mut Frame) -> io::Result<()> {
         // run action frame
         if self.active_area == ActiveArea::RunAction {
-            if self.current_action.is_none() {
+            if self.get_current_action().is_none() {
                 return Ok(());
             }
             <RunAction as Component>::render(
@@ -240,21 +359,31 @@ impl<'a> App<'a> {
         };
         action_list.render(frame, right_layout[0], self.active_area)?;
 
+        let action = self.get_current_action();
+        let action_clone = action.cloned();
         // updating text areas props
-        if let Some(action) = &self.current_action {
+        if let Some(action) = action_clone {
             if self.action_has_changed {
-                self.action_text_areas.action = Some(action.clone());
+                self.action_text_areas.left_text = action.body_example.clone();
+                self.action_text_areas.right_text = action.response_example.clone();
                 self.action_text_areas.clear_text_areas = true;
+
                 self.action_text_areas
                     .render(frame, right_layout[1], self.active_area)?;
                 self.action_has_changed = false;
 
                 self.run_action_pane
-                    .on_new_action(action.clone(), self.db.get_serializer());
+                    .on_new_action(&action, self.db.get_serializer());
             } else {
                 self.action_text_areas
                     .render(frame, right_layout[1], self.active_area)?;
             }
+        }
+
+        if self.active_area == ActiveArea::NewActionPopup {
+            let area = centered_rect(60, 20, frame.size());
+            frame.render_widget(Clear, area);
+            frame.render_widget(self.new_action_text_area.get_text_area().widget(), area);
         }
 
         Ok(())
@@ -268,73 +397,99 @@ impl<'a> App<'a> {
         if let Event::Key(key_event) = event {
             let ev: Input = Input::from(*key_event);
             match self.active_area {
-                ActiveArea::RunAction => self.run_action_pane.handle_event(ev, self.tx.clone()),
-                ActiveArea::ProjectPane => match ev {
-                    Input { key: Key::Esc, .. } => return Ok(true),
-                    Input {
-                        key: Key::Right, ..
-                    } => self.active_area = ActiveArea::ActionPane,
-                    Input { key: Key::Up, .. } => {
-                        self.projects.previous();
-                        self.update_displayed_actions();
-                    }
-                    Input { key: Key::Down, .. } => {
-                        self.projects.next();
-                        self.update_displayed_actions();
-                    }
-                    _ => {}
-                },
-                ActiveArea::ActionPane => match ev {
-                    Input { key: Key::Esc, .. } => return Ok(true),
-                    Input { key: Key::Left, .. } => self.active_area = ActiveArea::ProjectPane,
-                    Input { key: Key::Up, .. } => {
-                        self.actions.previous();
-                        self.set_current_action();
-                    }
-                    Input { key: Key::Down, .. } => {
-                        self.actions.next();
-                        self.set_current_action();
+                ActiveArea::NewActionPopup => match ev {
+                    Input { key: Key::Esc, .. } => {
+                        send_message(self.tx.clone(), Message::SwitchArea(ActiveArea::ActionPane));
                     }
                     Input {
                         key: Key::Enter, ..
                     } => {
-                        if self.current_action.is_some() {
-                            self.active_area = ActiveArea::RunAction
-                        }
+                        send_message(self.tx.clone(), Message::CreateAction);
                     }
+                    input => {
+                        send_message(self.tx.clone(), Message::InputTextArea(input));
+                    }
+                },
+                ActiveArea::RunAction => send_message(self.tx.clone(), Message::ForwardEvent(ev)),
+                ActiveArea::ProjectPane => match ev {
+                    Input { key: Key::Esc, .. } => return Ok(true),
                     Input {
-                        key: Key::Char('r'),
-                        ctrl: true,
-                        ..
-                    } => self.active_area = ActiveArea::ResponseExample,
-
-                    // go to body example widget
-                    Input {
-                        key: Key::Char('b'),
-                        ctrl: true,
-                        ..
-                    } => self.active_area = ActiveArea::BodyExample,
+                        key: Key::Right, ..
+                    } => send_message(self.tx.clone(), Message::SwitchArea(ActiveArea::ActionPane)),
+                    Input { key: Key::Up, .. } => {
+                        send_message(self.tx.clone(), Message::ListMove(Move::Up));
+                    }
+                    Input { key: Key::Down, .. } => {
+                        send_message(self.tx.clone(), Message::ListMove(Move::Down));
+                    }
                     _ => {}
                 },
-                ActiveArea::BodyExample | ActiveArea::ResponseExample => match ev {
-                    Input { key: Key::Esc, .. } => self.active_area = ActiveArea::ActionPane,
-                    input => match self.active_area {
-                        ActiveArea::ResponseExample => {
-                            let _ = self
-                                .action_text_areas
-                                .right_text_area
-                                .get_text_area_mut()
-                                .input(input);
+                ActiveArea::ActionPane => {
+                    match ev {
+                        Input { key: Key::Esc, .. } => return Ok(true),
+                        Input { key: Key::Left, .. } => send_message(
+                            self.tx.clone(),
+                            Message::SwitchArea(ActiveArea::ProjectPane),
+                        ),
+                        Input { key: Key::Up, .. } => {
+                            send_message(self.tx.clone(), Message::ListMove(Move::Up));
                         }
-                        ActiveArea::BodyExample => {
-                            let _ = self
-                                .action_text_areas
-                                .left_text_area
-                                .get_text_area_mut()
-                                .input(input);
+                        Input { key: Key::Down, .. } => {
+                            send_message(self.tx.clone(), Message::ListMove(Move::Down));
+                        }
+                        Input {
+                            key: Key::Enter, ..
+                        } => {
+                            if self.get_current_action().is_some() {
+                                send_message(
+                                    self.tx.clone(),
+                                    Message::SwitchArea(ActiveArea::RunAction),
+                                );
+                            }
+                        }
+                        Input {
+                            key: Key::Char('r'),
+                            ctrl: true,
+                            ..
+                        } => send_message(
+                            self.tx.clone(),
+                            Message::SwitchArea(ActiveArea::ResponseExample),
+                        ),
+
+                        // go to body example widget
+                        Input {
+                            key: Key::Char('b'),
+                            ctrl: true,
+                            ..
+                        } => send_message(
+                            self.tx.clone(),
+                            Message::SwitchArea(ActiveArea::BodyExample),
+                        ),
+                        Input {
+                            key: Key::Char('n'),
+                            ctrl: true,
+                            ..
+                        } => send_message(
+                            self.tx.clone(),
+                            Message::SwitchArea(ActiveArea::NewActionPopup),
+                        ),
+                        Input {
+                            key: Key::Char('d'),
+                            ctrl: true,
+                            ..
+                        } => {
+                            if self.active_area != ActiveArea::NewActionPopup {
+                                send_message(self.tx.clone(), Message::DeleteAction)
+                            }
                         }
                         _ => {}
-                    },
+                    }
+                }
+                ActiveArea::BodyExample | ActiveArea::ResponseExample => match ev {
+                    Input { key: Key::Esc, .. } => {
+                        send_message(self.tx.clone(), Message::SwitchArea(ActiveArea::ActionPane))
+                    }
+                    input => send_message(self.tx.clone(), Message::InputTextArea(input)),
                 },
             }
         }
@@ -344,15 +499,20 @@ impl<'a> App<'a> {
 
     pub fn ui(&mut self, f: &mut Frame) {
         if let Ok(message) = self.rx.try_recv() {
-            // handling messages checking the channel at each render
             match message {
                 Message::ActionSaved(action) => self.action_saved(action),
                 Message::RunResult(r) => self.run_action_pane.on_run_action_result(r),
                 // load other actions
-                Message::UpdateAction(actions) => self.actions.items = actions,
+                Message::UpdateActions(actions) => self.actions.items = actions,
                 Message::SaveAction => self.save_action(),
                 Message::RunAction => self.run_action(),
-                Message::LeaveRunAction => self.active_area = ActiveArea::ActionPane,
+                Message::DeleteAction => self.delete_action(),
+                Message::ActionDeleted => self.action_deleted(),
+                Message::SwitchArea(area) => self.switch_area(area),
+                Message::ListMove(m) => self.list_move(m),
+                Message::InputTextArea(input) => self.input_text_area(input),
+                Message::CreateAction => self.create_action(),
+                Message::ForwardEvent(input) => self.forward_event(input),
             }
         }
         let r = self.build_ui(f);

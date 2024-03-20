@@ -1,8 +1,13 @@
 use std::io;
 
-use super::app::ActiveArea;
-use ratatui::{layout::Rect, style::Color, widgets::ListState, Frame};
-use serde_json::Value;
+use super::{app::ActiveArea, components::run_action::ActiveRunActionArea};
+use ratatui::{
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Color, Style, Stylize},
+    text::{Line, Span},
+    widgets::{block::Title, Block, Borders, ListState, Tabs},
+    Frame,
+};
 
 pub trait Component {
     fn render(
@@ -103,11 +108,49 @@ pub fn highlight_if_needed(
     }
 }
 
-pub fn payload_as_str_pretty(payload: Option<&Value>) -> anyhow::Result<String> {
-    let r = serde_json::to_string_pretty(
-        &payload
-            .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
-            .unwrap_or(serde_json::Value::Null),
-    )?;
-    Ok(r)
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(r);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(popup_layout[1])[1]
+}
+
+//
+pub fn render_tabs<'a, T>(
+    tabs_title: Vec<&'static str>,
+    titles: Vec<T>,
+    current_active_area: &ActiveRunActionArea,
+    target_area: &ActiveRunActionArea,
+    selected_tab: usize,
+) -> Tabs<'a>
+where
+    T: Into<Title<'a>>,
+    Line<'a>: From<Vec<T>>,
+{
+    Tabs::new(tabs_title)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(titles)
+                .title_alignment(Alignment::Right)
+                .border_style(Style::default().fg(if current_active_area == target_area {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                })),
+        )
+        .divider(Span::raw("|"))
+        .select(selected_tab)
+        .style(Style::default().fg(Color::DarkGray))
+        .highlight_style(Style::default().fg(Color::Yellow).bold())
 }

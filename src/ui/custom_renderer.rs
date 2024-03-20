@@ -38,6 +38,10 @@ lazy_static! {
         .find_syntax_by_extension("json")
         .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text())
         .clone();
+    pub static ref PYTHON_SYNTAX: SyntaxReference = SYNTAX_SET
+        .find_syntax_by_extension("py")
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text())
+        .clone();
     pub static ref THEME: Theme = THEME_SET.themes["base16-ocean.dark"].clone();
 }
 
@@ -82,6 +86,7 @@ impl<'a> Renderer<'a> {
         let syntax = match self.extension {
             "json" => &*JSON_SYNTAX,
             "toml" => &*TOML_SYNTAX,
+            "py" => &*PYTHON_SYNTAX,
             _ => SYNTAX_SET.find_syntax_plain_text(),
         };
 

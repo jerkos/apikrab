@@ -6,7 +6,7 @@ use sqlx::{sqlite::SqlitePool, Executor};
 
 use super::db_trait::Db;
 
-static INIT_TABLES: &str = r#"
+static INIT_TABLES: &str = r#"--sql
 BEGIN TRANSACTION;
 
 CREATE TABLE projects (

@@ -31,10 +31,16 @@ impl<'a> Component for ActionList<'a> {
                 .items
                 .iter()
                 .map(|a| {
+                    let action_name = a.name.clone().unwrap_or(ANONYMOUS_ACTION.to_owned());
+                    if a.actions.is_empty() {
+                        return ListItem::new(vec![Line::styled(
+                            action_name,
+                            Style::default().fg(Color::LightGreen).bold(),
+                        )]);
+                    }
                     let first_domain_action = &a.actions[0];
                     let verb = &first_domain_action.verb;
                     let url = &first_domain_action.url;
-                    let action_name = a.name.clone().unwrap_or(ANONYMOUS_ACTION.to_owned());
                     ListItem::new(vec![
                         Line::styled(action_name, Style::default().fg(Color::LightGreen).bold()),
                         Line::from(vec![
@@ -97,14 +103,6 @@ impl<'a> Component for ActionList<'a> {
                                     .unwrap_or("".to_string()),
                                 Style::default().fg(Color::DarkGray),
                             ),
-                            Span::raw(" "),
-                            Span::styled(
-                                a.updated_at
-                                    .as_ref()
-                                    .map(human_readable_date)
-                                    .unwrap_or("".to_string()),
-                                Style::default().fg(Color::DarkGray),
-                            ),
                         ]),
                     ])
                 })
@@ -120,6 +118,10 @@ impl<'a> Component for ActionList<'a> {
                     " (".green(),
                     "←".green(),
                     ")".green(),
+                    " Ctlr+N".green(),
+                    "(New)".green().bold(),
+                    " Ctlr+D".green(),
+                    "(Delete)".green().bold(),
                 ])
                 .style(Style::reset())
                 .borders(Borders::ALL)

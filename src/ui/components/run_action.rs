@@ -1,6 +1,7 @@
-use std::io;
+use std::{cmp, collections::HashMap, io};
 
 use apikrab::serializer::SerDe;
+use lazy_static::lazy_static;
 use ratatui::{layout::*, prelude::*, widgets::*};
 use serde_json::Value;
 use tokio::sync::mpsc::Sender;
@@ -12,7 +13,7 @@ use crate::{
     ui::{
         app::{ActiveArea, Message},
         custom_renderer::{self, Renderer},
-        helpers::Component,
+        helpers::{render_tabs, Component},
     },
 };
 
@@ -48,12 +49,32 @@ pub enum TestStatus {
     Success,
 }
 
-#[derive(Default, PartialEq)]
-pub enum ActiveTextArea {
+#[derive(Default, PartialEq, Eq, Hash)]
+pub enum ActiveRunActionArea {
     #[default]
-    Edit,
+    EditTabs,
+    EditAction,
+    EditPreScript,
+    EditPostScript,
+    // left part
+    ResponseTabs,
     ResponseBody,
     ResponseHeaders,
+    ScriptOutput,
+}
+
+lazy_static! {
+    pub static ref EDIT_TABS: Vec<&'static str> = vec!["Action", "PreScript", "PostScript"];
+    pub static ref EDIT_HELP: Vec<Span<'static>> = vec![
+        "Edit".bold(),
+        " Ctlr+A".green(),
+        " Ctlr-S".green(),
+        "(Save)".bold(),
+        " Ctlr+R".green(),
+        "(Run)".bold(),
+    ];
+    pub static ref RESPONSE_TABS: Vec<&'static str> = vec!["Body", "Headers", "Script output"];
+    pub static ref RESPONSE_HELP: Vec<Span<'static>> = vec!["Response".bold(), " Ctlr+B".green(),];
 }
 
 pub struct RunAction<'a> {
@@ -62,23 +83,39 @@ pub struct RunAction<'a> {
     /// The project name of the action
     pub project_name: Option<String>,
 
+    // active tab
+    pub selected_edit_tab: usize,
+    pub selected_response_tab: usize,
+
     /// The active text area
-    pub active_text_area: ActiveTextArea,
+    pub active_text_area: ActiveRunActionArea,
 
     /// the extension of the file being edited for syntax highlighting
     pub edit_extension: String,
 
     /// The text area for editing the action
-    pub edit_text_area: TextArea<'a>,
-    pub edit_text_area_viewport: custom_renderer::Viewport,
+    pub edit_textarea: TextArea<'a>,
+    pub edit_textarea_viewport: custom_renderer::Viewport,
+
+    /// The text area for editing the action
+    pub pre_script_textarea: TextArea<'a>,
+    pub pre_script_textarea_viewport: custom_renderer::Viewport,
+
+    /// The text area for editing the action
+    pub post_script_textarea: TextArea<'a>,
+    pub post_script_textarea_viewport: custom_renderer::Viewport,
 
     /// The text area for the response body
-    pub response_body_text_area: TextArea<'a>,
-    pub response_body_text_area_viewport: custom_renderer::Viewport,
+    pub response_body_textarea: TextArea<'a>,
+    pub response_body_textarea_viewport: custom_renderer::Viewport,
 
     /// The text area for the response headers
-    pub response_headers_text_area: TextArea<'a>,
-    pub response_headers_text_area_viewport: custom_renderer::Viewport,
+    pub response_headers_textarea: TextArea<'a>,
+    pub response_headers_textarea_viewport: custom_renderer::Viewport,
+
+    /// The text area for the response headers
+    pub script_output_textarea: TextArea<'a>,
+    pub script_output_textarea_viewport: custom_renderer::Viewport,
 
     /// The status of the run
     pub status: RunStatus,
@@ -98,21 +135,32 @@ pub struct RunAction<'a> {
 impl<'a> RunAction<'a> {
     pub fn new(
         edit_extension: String,
-        edit_text_area: TextArea<'a>,
-        response_body_text_area: TextArea<'a>,
-        response_headers_text_area: TextArea<'a>,
+        edit_textarea: TextArea<'a>,
+        pre_script_textarea: TextArea<'a>,
+        post_script_textarea: TextArea<'a>,
+        response_body_textarea: TextArea<'a>,
+        response_headers_textarea: TextArea<'a>,
+        script_output_textarea: TextArea<'a>,
     ) -> RunAction<'a> {
         Self {
-            edit_text_area,
-            response_body_text_area,
-            response_headers_text_area,
+            edit_textarea,
+            selected_edit_tab: 0,
+            selected_response_tab: 0,
+            response_body_textarea,
+            response_headers_textarea,
+            script_output_textarea,
             action_name: None,
             project_name: None,
-            active_text_area: ActiveTextArea::default(),
+            active_text_area: ActiveRunActionArea::default(),
             edit_extension,
-            edit_text_area_viewport: custom_renderer::Viewport::default(),
-            response_body_text_area_viewport: custom_renderer::Viewport::default(),
-            response_headers_text_area_viewport: custom_renderer::Viewport::default(),
+            edit_textarea_viewport: custom_renderer::Viewport::default(),
+            pre_script_textarea,
+            pre_script_textarea_viewport: custom_renderer::Viewport::default(),
+            post_script_textarea,
+            post_script_textarea_viewport: custom_renderer::Viewport::default(),
+            response_body_textarea_viewport: custom_renderer::Viewport::default(),
+            response_headers_textarea_viewport: custom_renderer::Viewport::default(),
+            script_output_textarea_viewport: custom_renderer::Viewport::default(),
             status: RunStatus::default(),
             test_status: TestStatus::default(),
             test_results: None,
@@ -122,8 +170,9 @@ impl<'a> RunAction<'a> {
     }
 
     pub fn reset_response_with_status(&mut self, status: RunStatus) {
-        self.response_body_text_area.clear_text_area();
-        self.response_headers_text_area.clear_text_area();
+        self.response_body_textarea.clear_text_area();
+        self.response_headers_textarea.clear_text_area();
+        self.script_output_textarea.clear_text_area();
         self.status = status;
         self.fetch_result = None;
         self.test_status = TestStatus::NotRun;
@@ -132,9 +181,11 @@ impl<'a> RunAction<'a> {
 
     fn set_active_border_color(&mut self) {
         vec![
-            &mut self.edit_text_area,
-            &mut self.response_body_text_area,
-            &mut self.response_headers_text_area,
+            &mut self.edit_textarea,
+            &mut self.pre_script_textarea,
+            &mut self.response_body_textarea,
+            &mut self.response_headers_textarea,
+            &mut self.script_output_textarea,
         ]
         .into_iter()
         .for_each(|t| {
@@ -148,9 +199,12 @@ impl<'a> RunAction<'a> {
         });
 
         let active_text_area = match self.active_text_area {
-            ActiveTextArea::Edit => &mut self.edit_text_area,
-            ActiveTextArea::ResponseBody => &mut self.response_body_text_area,
-            ActiveTextArea::ResponseHeaders => &mut self.response_headers_text_area,
+            ActiveRunActionArea::EditAction => &mut self.edit_textarea,
+            ActiveRunActionArea::EditPreScript => &mut self.pre_script_textarea,
+            ActiveRunActionArea::ResponseBody => &mut self.response_body_textarea,
+            ActiveRunActionArea::ResponseHeaders => &mut self.response_headers_textarea,
+            ActiveRunActionArea::ScriptOutput => &mut self.script_output_textarea,
+            _ => return,
         };
         let block = active_text_area
             .get_text_area_mut()
@@ -161,7 +215,7 @@ impl<'a> RunAction<'a> {
         active_text_area.get_text_area_mut().set_block(block);
     }
 
-    pub fn on_new_action(&mut self, action: Action, serializer: Option<&FileTypeSerializer>) {
+    pub fn on_new_action(&mut self, action: &Action, serializer: Option<&FileTypeSerializer>) {
         self.action_name = action
             .name
             .clone()
@@ -172,13 +226,24 @@ impl<'a> RunAction<'a> {
             .clone()
             .or_else(|| ANONYMOUS_ACTION.to_owned().into());
 
-        let domain_actions: DomainActions = action.actions.into();
+        let mut domain_actions: DomainActions = (&action.actions).into();
+        // need to keep only the last action...
+        let first_domain_action = domain_actions.actions.last_mut();
+        let mut pre_script_cloned = None;
+        if let Some(d) = first_domain_action {
+            pre_script_cloned = d.pre_script.clone();
+            d.pre_script = None;
+        }
         let actions = match serializer {
             Some(s) => s.to_string(&domain_actions).unwrap_or("".to_string()),
             None => "".to_string(),
         };
-        self.edit_text_area.clear_text_area();
-        self.edit_text_area.set_text_content(&actions);
+        self.edit_textarea.clear_text_area();
+        self.edit_textarea.set_text_content(&actions);
+
+        self.pre_script_textarea.clear_text_area();
+        self.pre_script_textarea
+            .set_text_content(&pre_script_cloned.unwrap_or("".to_string()));
 
         self.reset_response_with_status(RunStatus::Idle);
     }
@@ -193,7 +258,7 @@ impl<'a> RunAction<'a> {
 
         // assuming that we keep the last fetch result
         let fetch_result = fetch_results.into_iter().last().unwrap();
-        self.response_body_text_area.set_text_content(
+        self.response_body_textarea.set_text_content(
             &fetch_result
                 .result
                 .as_ref()
@@ -205,7 +270,7 @@ impl<'a> RunAction<'a> {
                 })
                 .unwrap_or("".to_string()),
         );
-        self.response_headers_text_area.set_text_content(
+        self.response_headers_textarea.set_text_content(
             &fetch_result
                 .result
                 .as_ref()
@@ -214,6 +279,8 @@ impl<'a> RunAction<'a> {
                 .and_then(|h| serde_json::to_string_pretty(h).ok())
                 .unwrap_or("".to_string()),
         );
+        self.script_output_textarea
+            .set_text_content(&fetch_result.script_output);
         self.fetch_result = Some(fetch_result);
         self.test_results = Some(test_result.into_iter().last().unwrap_or(vec![]));
     }
@@ -222,11 +289,16 @@ impl<'a> RunAction<'a> {
         &self,
         file_type_serializer: &FileTypeSerializer,
     ) -> Option<Vec<DomainAction>> {
-        let actions = self.edit_text_area.get_text_content();
+        let actions = self.edit_textarea.get_text_content();
+        let pre_script = self.pre_script_textarea.get_text_content();
         let wrapper = file_type_serializer
             .from_str::<DomainActions>(&actions)
             .ok();
-        wrapper.map(|w| w.actions)
+        wrapper.map(|mut w| {
+            let last_action = w.actions.last_mut().unwrap();
+            last_action.pre_script = Some(pre_script);
+            w.actions
+        })
     }
 
     fn get_fetch_result_status_code(&self) -> u16 {
@@ -361,7 +433,13 @@ impl<'a> RunAction<'a> {
                         Style::default().fg(Color::Red).bold(),
                     ),
                 ]),
-                Line::from(vec![Span::raw("Project: ")]),
+                Line::from(vec![
+                    Span::raw("Project: "),
+                    Span::styled(
+                        self.project_name.clone().unwrap_or_default().to_string(),
+                        Style::default().yellow().bold(),
+                    ),
+                ]),
             ])
             .alignment(Alignment::Left)
             .block(Block::new().padding(Padding::new(2, 0, 1, 1)))
@@ -393,68 +471,239 @@ impl<'a> RunAction<'a> {
         )
     }
 
-    pub fn handle_event(&mut self, input: Input, tx: Sender<Message>) {
-        match input {
-            Input { key: Key::Esc, .. } => {
-                tokio::spawn(async move {
-                    tx.send(Message::LeaveRunAction).await.unwrap();
-                });
+    fn update_tabs(&mut self, key: Key) {
+        let idx = match self.active_text_area {
+            ActiveRunActionArea::EditTabs => &mut self.selected_edit_tab,
+            ActiveRunActionArea::ResponseTabs => &mut self.selected_response_tab,
+            _ => return,
+        };
+        let max_idx = match self.active_text_area {
+            ActiveRunActionArea::EditTabs => 2,
+            ActiveRunActionArea::ResponseTabs => 2,
+            _ => return,
+        };
+        match key {
+            Key::Right => {
+                *idx = cmp::min(*idx + 1, max_idx);
             }
+            Key::Left => {
+                *idx = cmp::max(*idx - 1, 0);
+            }
+            _ => {}
+        }
+    }
+
+    fn update_tabs_active_area(&mut self) {
+        match self.active_text_area {
+            ActiveRunActionArea::EditTabs => {
+                self.active_text_area = match self.selected_edit_tab {
+                    0 => ActiveRunActionArea::EditAction,
+                    1 => ActiveRunActionArea::EditPreScript,
+                    2 => ActiveRunActionArea::EditPostScript,
+                    _ => ActiveRunActionArea::EditAction,
+                };
+            }
+            ActiveRunActionArea::ResponseTabs => {
+                self.active_text_area = match self.selected_response_tab {
+                    0 => ActiveRunActionArea::ResponseBody,
+                    1 => ActiveRunActionArea::ResponseHeaders,
+                    2 => ActiveRunActionArea::ScriptOutput,
+                    _ => ActiveRunActionArea::ResponseBody,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    pub fn handle_event(&mut self, input: Input, tx: Sender<Message>) {
+        let tx_clone = tx.clone();
+        let mut textarea_by_active_area = [
+            (&ActiveRunActionArea::EditAction, &mut self.edit_textarea),
+            (
+                &ActiveRunActionArea::EditPreScript,
+                &mut self.pre_script_textarea,
+            ),
+            (
+                &ActiveRunActionArea::EditPostScript,
+                &mut self.post_script_textarea,
+            ),
+            (
+                &ActiveRunActionArea::ResponseBody,
+                &mut self.response_body_textarea,
+            ),
+            (
+                &ActiveRunActionArea::ResponseHeaders,
+                &mut self.response_headers_textarea,
+            ),
+            (
+                &ActiveRunActionArea::ScriptOutput,
+                &mut self.script_output_textarea,
+            ),
+        ]
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+        let sub_edit_tabs = [
+            &ActiveRunActionArea::EditAction,
+            &ActiveRunActionArea::EditPreScript,
+            &ActiveRunActionArea::EditPostScript,
+        ];
+        let sub_response_tabs = [
+            &ActiveRunActionArea::ResponseBody,
+            &ActiveRunActionArea::ResponseHeaders,
+            &ActiveRunActionArea::ScriptOutput,
+        ];
+
+        let tabs = [
+            &ActiveRunActionArea::EditTabs,
+            &ActiveRunActionArea::ResponseTabs,
+        ];
+
+        let require_handle_input = [
+            &ActiveRunActionArea::EditAction,
+            &ActiveRunActionArea::EditPreScript,
+            &ActiveRunActionArea::EditPostScript,
+            &ActiveRunActionArea::ResponseBody,
+            &ActiveRunActionArea::ResponseHeaders,
+            &ActiveRunActionArea::ScriptOutput,
+        ];
+        match input {
             Input {
                 key: Key::Char('r'),
                 ctrl: true,
                 ..
             } => {
-                if self.active_text_area == ActiveTextArea::Edit {
-                    tokio::spawn(async move {
-                        tx.send(Message::RunAction).await.unwrap();
-                    });
-                }
+                tokio::spawn(async move {
+                    tx.send(Message::RunAction).await.unwrap();
+                });
             }
             Input {
                 key: Key::Char('s'),
                 ctrl: true,
                 ..
             } => {
-                if self.active_text_area == ActiveTextArea::Edit {
-                    tokio::spawn(async move {
-                        tx.send(Message::SaveAction).await.unwrap();
-                    });
-                }
+                tokio::spawn(async move {
+                    tx.send(Message::SaveAction).await.unwrap();
+                });
             }
-            Input {
-                key: Key::Char('a'),
-                ctrl: true,
-                ..
-            } => self.active_text_area = ActiveTextArea::Edit,
             Input {
                 key: Key::Char('b'),
                 ctrl: true,
                 ..
-            } => self.active_text_area = ActiveTextArea::ResponseBody,
+            } => self.active_text_area = ActiveRunActionArea::ResponseTabs,
             Input {
-                key: Key::Char('h'),
+                key: Key::Char('a'),
                 ctrl: true,
                 ..
-            } => self.active_text_area = ActiveTextArea::ResponseHeaders,
-            input @ Input { key, .. } => {
-                let active_text_area = match &self.active_text_area {
-                    ActiveTextArea::Edit => &mut self.edit_text_area,
-                    ActiveTextArea::ResponseBody => &mut self.response_body_text_area,
-                    ActiveTextArea::ResponseHeaders => &mut self.response_headers_text_area,
-                };
-
-                let _ = active_text_area.get_text_area_mut().input(input);
-                if self.active_text_area == ActiveTextArea::Edit
-                    && key != Key::Left
-                    && key != Key::Right
-                    && key != Key::Up
-                    && key != Key::Down
-                {
-                    self.changed_content_not_saved = true;
+            } => self.active_text_area = ActiveRunActionArea::EditTabs,
+            Input { key: Key::Esc, .. } => {
+                if tabs.contains(&&self.active_text_area) {
+                    tokio::spawn(async move {
+                        tx_clone
+                            .send(Message::SwitchArea(ActiveArea::ActionPane))
+                            .await
+                            .unwrap();
+                    });
+                } else if sub_edit_tabs.contains(&&self.active_text_area) {
+                    self.active_text_area = ActiveRunActionArea::EditTabs;
+                } else if sub_response_tabs.contains(&&self.active_text_area) {
+                    self.active_text_area = ActiveRunActionArea::ResponseTabs;
                 }
             }
+            input @ Input {
+                key: Key::Right, ..
+            } => {
+                if require_handle_input.contains(&&self.active_text_area) {
+                    textarea_by_active_area
+                        .get_mut(&self.active_text_area)
+                        .unwrap()
+                        .get_text_area_mut()
+                        .input(input);
+                    return;
+                }
+                self.update_tabs(Key::Right);
+            }
+            input @ Input { key: Key::Left, .. } => {
+                if require_handle_input.contains(&&self.active_text_area) {
+                    textarea_by_active_area
+                        .get_mut(&self.active_text_area)
+                        .unwrap()
+                        .get_text_area_mut()
+                        .input(input);
+                    return;
+                }
+                self.update_tabs(Key::Left);
+            }
+            input @ Input {
+                key: Key::Enter, ..
+            } => {
+                if require_handle_input.contains(&&self.active_text_area) {
+                    textarea_by_active_area
+                        .get_mut(&self.active_text_area)
+                        .unwrap()
+                        .get_text_area_mut()
+                        .input(input);
+                    return;
+                }
+                self.update_tabs_active_area();
+            }
+            _ => {
+                if require_handle_input.contains(&&self.active_text_area) {
+                    textarea_by_active_area
+                        .get_mut(&self.active_text_area)
+                        .unwrap()
+                        .get_text_area_mut()
+                        .input(input);
+                }
+                self.changed_content_not_saved = sub_edit_tabs.contains(&&self.active_text_area);
+            }
         }
+    }
+
+    fn get_current_renderer(&mut self, area: &ActiveRunActionArea) -> Renderer {
+        let selected = match area {
+            ActiveRunActionArea::EditTabs => self.selected_edit_tab,
+            ActiveRunActionArea::ResponseTabs => self.selected_response_tab,
+            _ => 0,
+        };
+        let mut textareas = vec![
+            (&self.edit_textarea, &self.edit_textarea_viewport, "toml"),
+            (
+                &self.pre_script_textarea,
+                &self.pre_script_textarea_viewport,
+                "py",
+            ),
+            (
+                &self.post_script_textarea,
+                &self.post_script_textarea_viewport,
+                "py",
+            ),
+        ];
+        if *area == ActiveRunActionArea::ResponseTabs {
+            textareas = vec![
+                (
+                    &self.response_body_textarea,
+                    &self.response_body_textarea_viewport,
+                    "json",
+                ),
+                (
+                    &self.response_headers_textarea,
+                    &self.response_headers_textarea_viewport,
+                    "json",
+                ),
+                (
+                    &self.script_output_textarea,
+                    &self.script_output_textarea_viewport,
+                    "txt",
+                ),
+            ];
+        }
+        let textarea = textareas.get(selected).unwrap();
+        return Renderer {
+            text_area: textarea.0,
+            viewport: textarea.1,
+            extension: textarea.2,
+        };
     }
 }
 
@@ -487,21 +736,36 @@ impl Component for RunAction<'_> {
         let editor_area = Layout::default()
             .direction(layout::Direction::Horizontal)
             .constraints(vec![
-                layout::Constraint::Percentage(33),
-                layout::Constraint::Percentage(66),
+                layout::Constraint::Percentage(50),
+                layout::Constraint::Percentage(50),
             ])
             .split(layout[1]);
 
         self.set_active_border_color();
 
-        let edit_text_area_renderer = Renderer {
-            text_area: &self.edit_text_area,
-            viewport: &self.edit_text_area_viewport,
-            extension: "toml",
-        };
+        let editor_tabs_area = Layout::default()
+            .direction(layout::Direction::Vertical)
+            .constraints(vec![
+                layout::Constraint::Length(3),
+                layout::Constraint::Min(0),
+            ])
+            .split(editor_area[0]);
 
-        frame.render_widget(edit_text_area_renderer, editor_area[0]);
+        // render edit tabs
+        let edit_tabs = render_tabs(
+            EDIT_TABS.to_vec(),
+            EDIT_HELP.to_vec(),
+            &self.active_text_area,
+            &ActiveRunActionArea::EditTabs,
+            self.selected_edit_tab,
+        );
+        frame.render_widget(edit_tabs, editor_tabs_area[0]);
 
+        // render current edit renderer
+        let current_edit_renderer = self.get_current_renderer(&ActiveRunActionArea::EditTabs);
+        frame.render_widget(current_edit_renderer, editor_tabs_area[1]);
+
+        // result part
         let result_area = Layout::default()
             .direction(layout::Direction::Vertical)
             .constraints(vec![
@@ -510,29 +774,26 @@ impl Component for RunAction<'_> {
             ])
             .split(editor_area[1]);
 
-        let result_text_area = Layout::default()
-            .direction(layout::Direction::Horizontal)
+        let result_tabs_area = Layout::default()
+            .direction(layout::Direction::Vertical)
             .constraints(vec![
-                layout::Constraint::Percentage(50),
-                layout::Constraint::Percentage(50),
+                layout::Constraint::Length(3),
+                layout::Constraint::Min(0),
             ])
             .split(result_area[0]);
 
-        let response_body_text_area_renderer = Renderer {
-            text_area: &self.response_body_text_area,
-            viewport: &self.response_body_text_area_viewport,
-            extension: "json",
-        };
+        let result_tabs = render_tabs(
+            RESPONSE_TABS.to_vec(),
+            RESPONSE_HELP.to_vec(),
+            &self.active_text_area,
+            &ActiveRunActionArea::ResponseTabs,
+            self.selected_response_tab,
+        );
+        frame.render_widget(result_tabs, result_tabs_area[0]);
 
-        frame.render_widget(response_body_text_area_renderer, result_text_area[0]);
-
-        let response_headers_text_area_renderer = Renderer {
-            text_area: &self.response_headers_text_area,
-            viewport: &self.response_headers_text_area_viewport,
-            extension: "json",
-        };
-
-        frame.render_widget(response_headers_text_area_renderer, result_text_area[1]);
+        let current_response_renderer =
+            self.get_current_renderer(&ActiveRunActionArea::ResponseTabs);
+        frame.render_widget(current_response_renderer, result_tabs_area[1]);
 
         frame.render_widget(self.test_results(), result_area[1]);
 

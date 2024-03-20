@@ -1,10 +1,7 @@
-use crate::{
-    db::dto::Action,
-    ui::{
-        app::ActiveArea,
-        custom_renderer::{Renderer, Viewport},
-        helpers::{highlight_if_needed, payload_as_str_pretty},
-    },
+use crate::ui::{
+    app::ActiveArea,
+    custom_renderer::{Renderer, Viewport},
+    helpers::highlight_if_needed,
 };
 
 use ratatui::{
@@ -13,7 +10,7 @@ use ratatui::{
     widgets::{block::Title, Block, Borders},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TextArea<'a> {
     pub(crate) text_area: tui_textarea::TextArea<'a>,
 }
@@ -68,15 +65,16 @@ where
 }
 
 pub trait DisplayFromAction: Send + Sync {
-    fn set_left_text_area_text(&self, action: &Action, text_area: &mut TextArea<'_>);
-    fn set_right_text_area_text(&self, action: &Action, text_area: &mut TextArea<'_>);
+    fn set_left_text_area_text(&self, text: &str, text_area: &mut TextArea<'_>);
+    fn set_right_text_area_text(&self, text: &str, text_area: &mut TextArea<'_>);
     fn get_left_active_area(&self) -> ActiveArea;
     fn get_right_active_area(&self) -> ActiveArea;
 }
 
 #[derive(Clone)]
 pub struct ActionTextAreas<'a> {
-    pub action: Option<Action>,
+    pub left_text: Option<String>,
+    pub right_text: Option<String>,
     pub left_text_area: TextArea<'a>,
     pub l_viewport: Viewport,
     pub right_text_area: TextArea<'a>,
@@ -93,7 +91,8 @@ impl<'a> ActionTextAreas<'a> {
         #[allow(clippy::borrowed_box)] displayer: &'a Box<dyn DisplayFromAction>,
     ) -> Self {
         Self {
-            action: None,
+            left_text: None,
+            right_text: None,
             left_text_area: text_area(left_text_area_name),
             l_viewport: Viewport::default(),
             right_text_area: text_area(right_text_area_name),
@@ -117,11 +116,14 @@ impl<'a> ActionTextAreas<'a> {
 
         // set new text areas if needed
         if self.clear_text_areas {
-            let action = self.action.take().unwrap();
-            self.displayer
-                .set_left_text_area_text(&action, &mut self.left_text_area);
-            self.displayer
-                .set_right_text_area_text(&action, &mut self.right_text_area);
+            self.displayer.set_left_text_area_text(
+                self.left_text.as_deref().unwrap_or(""),
+                &mut self.left_text_area,
+            );
+            self.displayer.set_right_text_area_text(
+                self.right_text.as_deref().unwrap_or(""),
+                &mut self.right_text_area,
+            );
             self.clear_text_areas = false;
         }
 
@@ -156,16 +158,14 @@ impl<'a> ActionTextAreas<'a> {
 pub struct Examples {}
 
 impl DisplayFromAction for Examples {
-    fn set_left_text_area_text(&self, action: &Action, left_text_area: &mut TextArea<'_>) {
-        let body_ex = payload_as_str_pretty(action.body_example.as_ref()).unwrap();
+    fn set_left_text_area_text(&self, text: &str, left_text_area: &mut TextArea<'_>) {
         left_text_area.clear_text_area();
-        left_text_area.set_text_content(&body_ex);
+        left_text_area.set_text_content(&text);
     }
 
-    fn set_right_text_area_text(&self, action: &Action, right_text_area: &mut TextArea<'_>) {
-        let resp_ex = payload_as_str_pretty(action.response_example.as_ref()).unwrap();
+    fn set_right_text_area_text(&self, text: &str, right_text_area: &mut TextArea<'_>) {
         right_text_area.clear_text_area();
-        right_text_area.set_text_content(&resp_ex);
+        right_text_area.set_text_content(&text);
     }
 
     fn get_left_active_area(&self) -> ActiveArea {
